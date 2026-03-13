@@ -6,7 +6,7 @@
   --foreground: #0F172A;
   --foreground-muted: #64748B;
   --card: #FFFFFF;
-  --sidebar: #0F172A;
+  --sidebar: #18181b; /* zinc-900: gris neutro, sin tinte azul */
   --primary: #0EA5E9;
   --primary-hover: #0284C7;
   --primary-light: #E0F2FE;
@@ -53,7 +53,3 @@ body {
   font-family: var(--font-plus-jakarta), system-ui, sans-serif;
 }
 
-/* Sidebar - colores fijos según referencia */
-.sidebar-neura {
-  background-color: var(--sidebar) !important;
-}

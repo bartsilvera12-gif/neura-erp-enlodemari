@@ -229,7 +229,8 @@ export default function Sidebar() {
       initial={false}
       animate={{ width: collapsed ? 72 : 256 }}
       transition={{ duration: 0.2 }}
-      className="sidebar-neura flex shrink-0 flex-col border-r border-white/5"
+      className="flex shrink-0 flex-col border-r border-white/5"
+      style={{ backgroundColor: "var(--sidebar)" }}
     >
       {/* Logo SVG sin fondo - integrado en sidebar oscuro */}
       <div className="flex h-20 items-center justify-between gap-3 border-b border-white/10 px-4 py-3">

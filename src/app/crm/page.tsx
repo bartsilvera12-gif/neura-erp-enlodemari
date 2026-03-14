@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { Users, Calendar, Handshake, DollarSign, Trophy, TrendingUp } from "lucide-react";
 import { getProspectos, moveProspecto } from "@/lib/crm/storage";
 import type { EtapaFunnel, Prospecto } from "@/lib/crm/types";
 
@@ -27,11 +28,6 @@ const ETAPA_CFG: Record<EtapaFunnel, {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function hoyStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 function formatGs(valor: number) {
   if (valor >= 1_000_000) return `${(valor / 1_000_000).toFixed(1)}M`;
   if (valor >= 1_000)     return `${(valor / 1_000).toFixed(0)}k`;
@@ -51,13 +47,18 @@ function formatFechaCorta(yyyymmdd: string) {
   return `${d}/${m}`;
 }
 
-/** Verifica si una fecha ISO cae dentro del rango YYYY-MM-DD dado. */
-function enRango(isoStr: string, desde: string, hasta: string): boolean {
-  const d   = new Date(isoStr);
-  const str = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  if (desde && str < desde) return false;
-  if (hasta && str > hasta) return false;
-  return true;
+/** Verifica si una fecha ISO cae en el día de hoy. */
+function esHoy(isoStr: string): boolean {
+  const d = new Date(isoStr);
+  const hoy = new Date();
+  return d.getFullYear() === hoy.getFullYear() && d.getMonth() === hoy.getMonth() && d.getDate() === hoy.getDate();
+}
+
+/** Verifica si una fecha ISO cae en el mes actual. */
+function esMesActual(isoStr: string): boolean {
+  const d = new Date(isoStr);
+  const hoy = new Date();
+  return d.getFullYear() === hoy.getFullYear() && d.getMonth() === hoy.getMonth();
 }
 
 // ── Avatar ────────────────────────────────────────────────────────────────────
@@ -311,15 +312,20 @@ function MetricCard({
   value,
   sub,
   color,
+  icon: Icon,
 }: {
   label: string;
   value: string | number;
   sub?: string;
   color: string;
+  icon?: React.ComponentType<{ className?: string }>;
 }) {
   return (
     <div className={`bg-white rounded-xl border ${color} p-4 shadow-sm`}>
-      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{label}</p>
+      <div className="flex items-center gap-2 mb-1">
+        {Icon && <Icon className="w-4 h-4 text-slate-500" />}
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{label}</p>
+      </div>
       <p className="text-2xl font-bold text-gray-800 tabular-nums">{value}</p>
       {sub && <p className="text-xs text-gray-500 mt-0.5">{sub}</p>}
     </div>
@@ -331,8 +337,6 @@ function MetricCard({
 export default function CrmPage() {
   const [prospectos,    setProspectos]    = useState<Prospecto[]>([]);
   const [dragOverEtapa, setDragOverEtapa] = useState<EtapaFunnel | null>(null);
-  const [desdeDate,     setDesdeDate]     = useState(hoyStr());
-  const [hastaDate,     setHastaDate]     = useState(hoyStr());
   const dragIdRef = useRef<string | null>(null);
 
   function recargar() {
@@ -363,28 +367,20 @@ export default function CrmPage() {
 
   const porEtapa = (etapa: EtapaFunnel) => prospectos.filter((p) => p.etapa === etapa);
 
-  // ── Métricas ──────────────────────────────────────────────────────────────
+  // ── Métricas del mini dashboard ───────────────────────────────────────────
 
-  // Leads creados en el rango de fechas
-  const leadsRango = prospectos.filter(
-    (p) => enRango(p.fecha_creacion, desdeDate, hastaDate)
-  ).length;
+  const leadsHoy = prospectos.filter((p) => esHoy(p.fecha_creacion)).length;
+  const leadsMes = prospectos.filter((p) => esMesActual(p.fecha_creacion)).length;
 
-  // En negociación (sin filtro de fecha — estado actual)
-  const enNegociacion      = porEtapa("NEGOCIACION");
-  const cantNegociacion    = enNegociacion.length;
-  const valorNegociacion   = enNegociacion.reduce((s, p) => s + p.valor_estimado, 0);
+  const enNegociacion    = porEtapa("NEGOCIACION");
+  const cantNegociacion  = enNegociacion.length;
+  const valorNegociacion = enNegociacion.reduce((s, p) => s + p.valor_estimado, 0);
 
-  // Ganados en el rango de fechas
-  const ganadosRango = prospectos.filter(
-    (p) => p.etapa === "GANADO" && enRango(p.fecha_actualizacion, desdeDate, hastaDate)
-  );
-  const cantGanadosRango  = ganadosRango.length;
-  const ingresoGanadoRango = ganadosRango.reduce((s, p) => s + p.valor_estimado, 0);
+  const ganadosHoy = prospectos.filter((p) => p.etapa === "GANADO" && esHoy(p.fecha_actualizacion));
+  const ingresosGanadosHoy = ganadosHoy.reduce((s, p) => s + p.valor_estimado, 0);
 
-  // Etiqueta de período para las métricas HOY
-  const esHoy = desdeDate === hastaDate && desdeDate === hoyStr();
-  const labelPeriodo = esHoy ? "hoy" : `${formatFechaCorta(desdeDate)} – ${formatFechaCorta(hastaDate)}`;
+  const ganadosMes = prospectos.filter((p) => p.etapa === "GANADO" && esMesActual(p.fecha_actualizacion));
+  const ingresosMes = ganadosMes.reduce((s, p) => s + p.valor_estimado, 0);
 
   return (
     <div className="flex flex-col gap-5 h-full">
@@ -406,68 +402,63 @@ export default function CrmPage() {
         </Link>
       </div>
 
-      {/* Filtro de fechas */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-medium text-gray-500">Desde</label>
-          <input
-            type="date"
-            value={desdeDate}
-            onChange={(e) => setDesdeDate(e.target.value)}
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#0EA5E9] focus:outline-none bg-white"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-medium text-gray-500">Hasta</label>
-          <input
-            type="date"
-            value={hastaDate}
-            onChange={(e) => setHastaDate(e.target.value)}
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#0EA5E9] focus:outline-none bg-white"
-          />
-        </div>
-        {!esHoy && (
-          <button
-            type="button"
-            onClick={() => { setDesdeDate(hoyStr()); setHastaDate(hoyStr()); }}
-            className="text-xs text-slate-500 hover:text-slate-900 border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50 transition-colors"
-          >
-            Hoy
-          </button>
-        )}
-      </div>
-
-      {/* Dashboard de métricas */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+      {/* Mini dashboard comercial */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
         <MetricCard
-          label={`Leads ${labelPeriodo}`}
-          value={leadsRango}
-          sub="nuevos registros"
-          color="border-gray-200"
+          label="Leads Hoy"
+          value={leadsHoy}
+          sub="creados hoy"
+          color="border-slate-200"
+          icon={Users}
         />
         <MetricCard
-          label="En negociación"
+          label="Leads del Mes"
+          value={leadsMes}
+          sub="creados en el mes"
+          color="border-slate-200"
+          icon={Calendar}
+        />
+        <MetricCard
+          label="En Negociación"
           value={cantNegociacion}
           sub="oportunidades activas"
           color="border-amber-200"
+          icon={Handshake}
         />
         <MetricCard
-          label="Valor negociación"
+          label="Valor en Negociación"
           value={`Gs. ${formatGs(valorNegociacion)}`}
           sub="pipeline en proceso"
           color="border-amber-200"
+          icon={DollarSign}
         />
         <MetricCard
-          label={`Ganados ${labelPeriodo}`}
-          value={cantGanadosRango}
-          sub="cierres del período"
+          label="Ganados Hoy"
+          value={ganadosHoy.length}
+          sub="cierres del día"
           color="border-green-200"
+          icon={Trophy}
         />
         <MetricCard
-          label={`Ingreso ganado ${labelPeriodo}`}
-          value={`Gs. ${formatGs(ingresoGanadoRango)}`}
-          sub="valor cerrado"
+          label="Ingresos Ganados Hoy"
+          value={`Gs. ${formatGs(ingresosGanadosHoy)}`}
+          sub="valor cerrado hoy"
           color="border-green-200"
+          icon={DollarSign}
+        />
+        <MetricCard
+          label="Ganados del Mes"
+          value={ganadosMes.length}
+          sub="cierres del mes"
+          color="border-green-200"
+          icon={Trophy}
+        />
+        <MetricCard
+          label="Ingresos del Mes"
+          value={`Gs. ${formatGs(ingresosMes)}`}
+          sub="valor cerrado en el mes"
+          color="border-green-200"
+          icon={TrendingUp}
         />
       </div>
 

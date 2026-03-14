@@ -210,6 +210,7 @@ export async function updateProspecto(
   // creado_por no se actualiza: queda fijo con quien creó el lead
   if (datos.responsable !== undefined) patch.responsable = datos.responsable ?? null;
   if (datos.cliente_creado !== undefined) patch.cliente_creado = datos.cliente_creado;
+  patch.fecha_actualizacion = new Date().toISOString();
 
   const { data, error } = await supabase
     .from("crm_prospectos")

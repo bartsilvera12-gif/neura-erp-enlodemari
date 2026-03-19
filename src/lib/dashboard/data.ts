@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { getProspectos } from "@/lib/crm/storage";
+import { getCurrentUser } from "@/lib/auth";
 
 // ── Tipos de salida (estructura esperada por el Dashboard en page.tsx) ────────
 
@@ -127,6 +128,18 @@ function toDateStr(v: string | null | undefined): string {
   return isNaN(d.getTime()) ? "" : d.toISOString();
 }
 
+/** Convierte cualquier valor a número seguro (evita NaN, strings concatenados, objetos). */
+function toNum(v: unknown): number {
+  if (v == null) return 0;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = parseFloat(v.replace(/\s/g, ""));
+    return Number.isFinite(n) ? n : 0;
+  }
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
 // ── getDashboardData ──────────────────────────────────────────────────────────
 
 /**
@@ -151,12 +164,17 @@ async function fetchProspectos(): Promise<ProspectoRaw[]> {
 
 /**
  * Obtiene todos los datos necesarios para el Dashboard desde Supabase.
- * RLS filtra por empresa_id automáticamente (igual que getFacturas, getClientes, etc.).
- * No usa queryEmpresa para evitar fallos con usuarios sin empresa_id (ej. super_admin).
+ * Filtra por empresa_id cuando el usuario tiene uno (evita que super_admin sume todas las empresas).
  */
 export async function getDashboardData(): Promise<DashboardData> {
-  // 1. Prospectos desde el CRM
   const prospectos = await fetchProspectos();
+  const usuario = await getCurrentUser();
+  let empresaId = usuario?.empresa_id ?? null;
+  // Super_admin sin empresa_id: usar la primera empresa para evitar sumar todas (450B)
+  if (!empresaId) {
+    const { data: primera } = await supabase.from("empresas").select("id").limit(1).maybeSingle();
+    empresaId = primera?.id ?? null;
+  }
 
   let clientes: ClienteRaw[] = [];
   let facturas: FacturaRaw[] = [];
@@ -167,18 +185,21 @@ export async function getDashboardData(): Promise<DashboardData> {
   let compras: CompraRaw[] = [];
   let gastos: GastoRaw[] = [];
 
+  const eqEmpresa = (q: ReturnType<typeof supabase.from>) =>
+    empresaId ? (q as any).eq("empresa_id", empresaId) : q;
+
   try {
     const [clientesQ, facturasQ, pagosQ, tipificacionesQ, productosQ, ventasQ, ventasItemsQ, comprasQ, gastosQ] =
       await Promise.all([
-        supabase.from("clientes").select("*"),
-        supabase.from("facturas").select("*"),
-        supabase.from("pagos").select("id, factura_id, monto, fecha_pago"),
-        supabase.from("tipificaciones").select("*"),
-        supabase.from("productos").select("*"),
-        supabase.from("ventas").select("*"),
-        supabase.from("ventas_items").select("*"),
-        supabase.from("compras").select("*"),
-        supabase.from("gastos").select("id, monto, fecha"),
+        eqEmpresa(supabase.from("clientes")).select("*"),
+        eqEmpresa(supabase.from("facturas")).select("*"),
+        eqEmpresa(supabase.from("pagos")).select("id, factura_id, monto, fecha_pago"),
+        eqEmpresa(supabase.from("tipificaciones")).select("*"),
+        eqEmpresa(supabase.from("productos")).select("*"),
+        eqEmpresa(supabase.from("ventas")).select("*"),
+        eqEmpresa(supabase.from("ventas_items")).select("*"),
+        eqEmpresa(supabase.from("compras")).select("*"),
+        eqEmpresa(supabase.from("gastos")).select("id, monto, fecha"),
       ]);
 
     if (clientesQ.error) throw new Error(clientesQ.error.message);
@@ -200,32 +221,25 @@ export async function getDashboardData(): Promise<DashboardData> {
       vendedor_asignado: r.vendedor_asignado as string | undefined,
     }));
 
-    facturas = (facturasQ.data ?? []).map((r: Record<string, unknown>) => {
-      const monto = Number(r.monto);
-      const saldo = Number(r.saldo);
-      return {
-        id: r.id as string,
-        cliente_id: r.cliente_id as string,
-        numero_factura: (r.numero_factura as string) ?? "",
-        fecha: toDateStr(r.fecha as string),
-        fecha_vencimiento: toDateStr(r.fecha_vencimiento as string),
-        monto: Number.isFinite(monto) ? monto : 0,
-        saldo: Number.isFinite(saldo) ? saldo : 0,
-        estado: (r.estado as string) ?? "Pendiente",
-        tipo: (r.tipo as string) ?? "credito",
-        moneda: (r.moneda as string) ?? "GS",
-      };
-    });
+    facturas = (facturasQ.data ?? []).map((r: Record<string, unknown>) => ({
+      id: r.id as string,
+      cliente_id: r.cliente_id as string,
+      numero_factura: (r.numero_factura as string) ?? "",
+      fecha: toDateStr(r.fecha as string),
+      fecha_vencimiento: toDateStr(r.fecha_vencimiento as string),
+      monto: toNum(r.monto),
+      saldo: toNum(r.saldo),
+      estado: (r.estado as string) ?? "Pendiente",
+      tipo: (r.tipo as string) ?? "credito",
+      moneda: (r.moneda as string) ?? "GS",
+    }));
 
-    pagos = (pagosQ.data ?? []).map((r: Record<string, unknown>) => {
-      const m = Number(r.monto);
-      return {
-        id: r.id as string,
-        factura_id: r.factura_id as string,
-        monto: Number.isFinite(m) ? m : 0,
-        fecha_pago: toDateStr(r.fecha_pago as string),
-      };
-    });
+    pagos = (pagosQ.data ?? []).map((r: Record<string, unknown>) => ({
+      id: r.id as string,
+      factura_id: r.factura_id as string,
+      monto: toNum(r.monto),
+      fecha_pago: toDateStr(r.fecha_pago as string),
+    }));
 
     tipificaciones = (tipificacionesQ.data ?? []).map((r: Record<string, unknown>) => ({
       id: r.id as string,
@@ -288,18 +302,15 @@ export async function getDashboardData(): Promise<DashboardData> {
       producto_id: r.producto_id as string | undefined,
       producto_nombre: (r.producto_nombre as string) ?? "",
       proveedor_nombre: (r.proveedor_nombre as string) ?? "",
-      total: Number(r.total) ?? 0,
+      total: toNum(r.total),
       fecha: toDateStr(r.fecha as string),
     }));
 
-    gastos = (gastosQ.data ?? []).map((r: Record<string, unknown>) => {
-      const m = Number(r.monto);
-      return {
-        id: r.id as string,
-        monto: Number.isFinite(m) ? m : 0,
-        fecha: (r.fecha as string) ?? "",
-      };
-    });
+    gastos = (gastosQ.data ?? []).map((r: Record<string, unknown>) => ({
+      id: r.id as string,
+      monto: toNum(r.monto),
+      fecha: (r.fecha as string) ?? "",
+    }));
   } catch (err) {
     console.warn("[dashboard] Error cargando tablas empresa (clientes, facturas, etc.):", err);
     // prospectos ya cargados; clientes, facturas, etc. quedan vacíos

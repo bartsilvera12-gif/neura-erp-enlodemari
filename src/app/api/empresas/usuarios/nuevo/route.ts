@@ -13,10 +13,8 @@ function emailExistsInAuthError(msg: string): boolean {
   );
 }
 
-async function findAuthUserIdByEmail(
-  supabase: ReturnType<typeof createClient>,
-  email: string
-): Promise<string | null> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function findAuthUserIdByEmail(supabase: any, email: string): Promise<string | null> {
   const target = email.trim().toLowerCase();
   let page = 1;
   while (true) {

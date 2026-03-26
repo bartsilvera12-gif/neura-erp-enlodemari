@@ -249,26 +249,11 @@ export default function ConversacionesPage() {
           <h1 className="text-2xl font-bold text-slate-800">Conversaciones</h1>
           <p className="text-sm text-slate-500">WhatsApp · bandeja de entrada</p>
         </div>
-        <Link
-          href="/configuracion/conversaciones"
-          className="shrink-0 text-sm font-medium text-[#0EA5E9] hover:underline px-3 py-2 rounded-lg border border-sky-200 bg-sky-50"
-        >
-          Configurar canal WhatsApp
-        </Link>
-        <Link
-          href="/configuracion/conversaciones/flujos"
-          className="shrink-0 text-sm font-medium text-[#0EA5E9] hover:underline px-3 py-2 rounded-lg border border-sky-200 bg-sky-50"
-        >
-          Gestionar flujos
-        </Link>
       </div>
 
       {hasActiveChannel === false && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-900 text-sm rounded-lg px-4 py-3 flex flex-wrap items-center justify-between gap-2">
-          <span>No hay un canal WhatsApp activo para tu empresa. Los mensajes no se registrarán hasta configurarlo.</span>
-          <Link href="/configuracion/conversaciones" className="font-semibold text-amber-800 hover:underline">
-            Ir a configuración →
-          </Link>
+        <div className="bg-amber-50 border border-amber-200 text-amber-900 text-sm rounded-lg px-4 py-3">
+          No hay un canal WhatsApp activo para tu empresa. Los mensajes no se registrarán hasta configurarlo.
         </div>
       )}
 
@@ -290,12 +275,6 @@ export default function ConversacionesPage() {
             ) : conversations.length === 0 ? (
               <div className="p-6 text-sm text-slate-500 text-center space-y-2">
                 <p>No hay conversaciones aún</p>
-                <Link
-                  href="/configuracion/conversaciones"
-                  className="inline-block text-[#0EA5E9] hover:underline text-xs"
-                >
-                  Configurar número de WhatsApp
-                </Link>
               </div>
             ) : (
               conversations.map((c) => (

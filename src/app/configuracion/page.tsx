@@ -5,11 +5,14 @@ import MontoInput from "@/components/ui/MontoInput";
 import { getConfig, saveConfig, resetConfig } from "@/lib/config/storage";
 import { getCurrentUser } from "@/lib/auth";
 import { getEtapasParaConfig, createEtapa, updateEtapa, deleteEtapa, getEtapaClasses, type EtapaCrm } from "@/lib/crm/etapas";
+import { getMisModulos } from "@/lib/empresas/actions";
 import type { ConfigGlobal, FormatoFecha, IdiomaDefault, MonedaBase, Timezone } from "@/lib/config/types";
+import ConfiguracionCanalesPage from "@/app/dashboard/conversaciones/configuracion/page";
+import FlowsListPage from "@/app/dashboard/conversaciones/flujos/page";
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
-type Tab = "facturacion" | "politicas" | "preferencias" | "metricas" | "crm";
+type Tab = "facturacion" | "politicas" | "preferencias" | "metricas" | "crm" | "conversaciones";
 
 // ── Helpers UI ────────────────────────────────────────────────────────────────
 
@@ -57,6 +60,7 @@ export default function ConfiguracionPage() {
   const [success,   setSuccess]   = useState(false);
   const [showReset, setShowReset] = useState(false);
   const [esAdmin,   setEsAdmin]   = useState(false);
+  const [hasConversacionesModulo, setHasConversacionesModulo] = useState(false);
   const [etapasCrm, setEtapasCrm] = useState<EtapaCrm[]>([]);
   const [nuevaEtapa, setNuevaEtapa] = useState({ nombre: "", codigo: "", color: "gray", orden: 0 });
   const [editandoEtapa, setEditandoEtapa] = useState<string | null>(null);
@@ -87,6 +91,12 @@ export default function ConfiguracionPage() {
       const rol = (u as { rol?: string })?.rol;
       setEsAdmin(rol === "admin" || rol === "administrador" || rol === "super_admin");
     });
+    getMisModulos()
+      .then((mods) => {
+        const slugs = new Set(mods.map((m) => m.slug));
+        setHasConversacionesModulo(slugs.has("conversaciones") || slugs.has("omnicanal"));
+      })
+      .catch(() => setHasConversacionesModulo(false));
   }, []);
 
   useEffect(() => {
@@ -124,8 +134,7 @@ export default function ConfiguracionPage() {
     }));
   }
 
-  function handleGuardar(e: React.FormEvent) {
-    e.preventDefault();
+  function handleGuardar() {
     const saved = saveConfig(form);
     setConfig(saved);
     setSuccess(true);
@@ -168,6 +177,9 @@ export default function ConfiguracionPage() {
     { id: "preferencias", label: "Preferencias",           icon: "⚙️" },
     { id: "metricas",     label: "Métricas",               icon: "🎯" },
     { id: "crm",          label: "Configuración CRM",      icon: "📊" },
+    ...(hasConversacionesModulo
+      ? [{ id: "conversaciones" as const, label: "Conversaciones / WhatsApp", icon: "💬" }]
+      : []),
   ];
 
   const facturaPreview = `${form.prefijo_factura}${String(form.numeracion_inicial).padStart(6, "0")}`;
@@ -222,7 +234,7 @@ export default function ConfiguracionPage() {
       </div>
 
       {/* ── Formulario ──────────────────────────────────────────────── */}
-      <form onSubmit={handleGuardar} className="space-y-5">
+      <div className="space-y-5">
 
         {/* ══ TAB: FACTURACIÓN ══════════════════════════════════════ */}
         {tab === "facturacion" && (
@@ -704,18 +716,33 @@ export default function ConfiguracionPage() {
           </>
         )}
 
-        {/* ── Botón guardar (siempre visible) ─────────────────────── */}
-        <div className="flex items-center gap-4 pt-2">
-          <button type="submit"
-            className="bg-[#0EA5E9] hover:bg-[#0284C7] text-white text-sm font-semibold px-6 py-2.5 rounded-lg transition-colors shadow-sm active:scale-95">
-            Guardar configuración
-          </button>
-          <p className="text-xs text-gray-400">
-            Los cambios se aplican de inmediato en todo el sistema.
-          </p>
-        </div>
+        {tab === "conversaciones" && hasConversacionesModulo && (
+          <div className="space-y-5">
+            <Card>
+              <SectionTitle>Configuración del canal WhatsApp</SectionTitle>
+              <ConfiguracionCanalesPage />
+            </Card>
+            <Card>
+              <SectionTitle>Configuración de flujos conversacionales</SectionTitle>
+              <FlowsListPage />
+            </Card>
+          </div>
+        )}
 
-      </form>
+        {/* ── Botón guardar (siempre visible) ─────────────────────── */}
+        {tab !== "conversaciones" && (
+          <div className="flex items-center gap-4 pt-2">
+            <button type="button" onClick={handleGuardar}
+              className="bg-[#0EA5E9] hover:bg-[#0284C7] text-white text-sm font-semibold px-6 py-2.5 rounded-lg transition-colors shadow-sm active:scale-95">
+              Guardar configuración
+            </button>
+            <p className="text-xs text-gray-400">
+              Los cambios se aplican de inmediato en todo el sistema.
+            </p>
+          </div>
+        )}
+
+      </div>
     </div>
   );
 }

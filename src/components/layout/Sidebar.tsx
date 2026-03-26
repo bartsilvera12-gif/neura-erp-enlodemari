@@ -50,8 +50,6 @@ const MENU_STRUCTURE: MenuItem[] = [
     children: [
       { label: "Inbox", href: "/dashboard/conversaciones" },
       { label: "Historial", href: "/dashboard/historial" },
-      { label: "Config. WhatsApp", href: "/configuracion/conversaciones" },
-      { label: "Config. Flujos", href: "/configuracion/conversaciones/flujos" },
     ],
   },
   { slug: "ventas", label: "Ventas", href: "/ventas", icon: ShoppingCart },
@@ -64,17 +62,7 @@ const MENU_STRUCTURE: MenuItem[] = [
   { slug: "gastos", label: "Gastos", href: "/gastos", icon: Receipt },
   { slug: "pagos", label: "Pagos", href: "/pagos", icon: Banknote },
   { slug: "usuarios", label: "Usuarios", href: "/usuarios", icon: UserCog },
-  {
-    slug: "configuracion",
-    label: "Configuración",
-    href: "/configuracion",
-    icon: Settings,
-    children: [
-      { label: "Global", href: "/configuracion" },
-      { label: "Conversaciones / WhatsApp", href: "/configuracion/conversaciones" },
-      { label: "Flujos Conversacionales", href: "/configuracion/conversaciones/flujos" },
-    ],
-  },
+  { slug: "configuracion", label: "Configuración", href: "/configuracion", icon: Settings },
   { slug: "planes", label: "Planes", href: "/planes", icon: FileText },
   { slug: "gestion-clientes", label: "Gestión Clientes", href: "/gestion-clientes", icon: Users },
   { slug: "crm", label: "CRM Funnel", href: "/crm", icon: Sparkles },
@@ -210,7 +198,6 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({
     conversaciones: true,
-    configuracion: true,
     inventario: true,
     sorteos: true,
   });

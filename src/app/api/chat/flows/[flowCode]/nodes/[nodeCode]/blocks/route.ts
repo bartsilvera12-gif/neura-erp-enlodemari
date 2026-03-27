@@ -9,6 +9,15 @@ function getSupabaseAdmin() {
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
 }
 
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === "https:" || u.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 async function resolveNodeId(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   empresaId: string,
@@ -76,6 +85,16 @@ export async function POST(
       return NextResponse.json({ ok: false, error: "block_type inválido" }, { status: 400 });
     }
     const supabase = getSupabaseAdmin();
+    if (blockType === "image") {
+      const mediaUrl = (body.media_url ?? "").trim();
+      if (mediaUrl && !isValidHttpUrl(mediaUrl)) {
+        return NextResponse.json({ ok: false, error: "media_url de imagen debe ser URL http/https válida" }, { status: 400 });
+      }
+      const caption = (body.content_text ?? "").trim();
+      if (caption.length > 1024) {
+        return NextResponse.json({ ok: false, error: "Caption excede 1024 caracteres" }, { status: 400 });
+      }
+    }
     const nodeId = await resolveNodeId(supabase, auth.empresa_id, params.flowCode, params.nodeCode);
     if (!nodeId) return NextResponse.json({ ok: false, error: "Nodo no encontrado" }, { status: 404 });
 

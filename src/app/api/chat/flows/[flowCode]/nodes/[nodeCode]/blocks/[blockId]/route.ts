@@ -9,6 +9,15 @@ function getSupabaseAdmin() {
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
 }
 
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === "https:" || u.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ flowCode: string; nodeCode: string; blockId: string }> }
@@ -30,12 +39,40 @@ export async function PATCH(
       patch.block_type = body.block_type;
     }
     if ("content_text" in body) patch.content_text = body.content_text ?? null;
-    if ("media_url" in body) patch.media_url = body.media_url ?? null;
+    if ("media_url" in body) {
+      const mediaUrl = body.media_url?.trim() ?? "";
+      patch.media_url = mediaUrl || null;
+    }
     if (typeof body.sort_order === "number" && Number.isFinite(body.sort_order)) {
       patch.sort_order = Math.trunc(body.sort_order);
     }
 
     const supabase = getSupabaseAdmin();
+    const { data: current, error: cErr } = await supabase
+      .from("chat_flow_node_blocks")
+      .select("block_type")
+      .eq("id", params.blockId)
+      .eq("empresa_id", auth.empresa_id)
+      .maybeSingle();
+    if (cErr) return NextResponse.json({ ok: false, error: cErr.message }, { status: 400 });
+    if (!current) return NextResponse.json({ ok: false, error: "Bloque no encontrado" }, { status: 404 });
+
+    const effectiveType =
+      (typeof patch.block_type === "string" ? patch.block_type : (current.block_type as string)) || "text";
+    if (effectiveType === "image") {
+      const mediaUrl = (patch.media_url as string | null | undefined)?.trim() ?? "";
+      if (mediaUrl && !isValidHttpUrl(mediaUrl)) {
+        return NextResponse.json(
+          { ok: false, error: "media_url de imagen debe ser URL http/https válida" },
+          { status: 400 }
+        );
+      }
+      const caption = (patch.content_text as string | null | undefined)?.trim() ?? "";
+      if (caption.length > 1024) {
+        return NextResponse.json({ ok: false, error: "Caption excede 1024 caracteres" }, { status: 400 });
+      }
+    }
+
     const { data, error } = await supabase
       .from("chat_flow_node_blocks")
       .update(patch)

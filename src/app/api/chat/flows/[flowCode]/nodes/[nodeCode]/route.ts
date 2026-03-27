@@ -9,6 +9,17 @@ function getSupabaseAdmin() {
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
 }
 
+const VALID_NODE_TYPES = ["buttons", "list", "text", "media", "image_input", "human", "end"] as const;
+
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === "https:" || u.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ flowCode: string; nodeCode: string }> }
@@ -29,7 +40,13 @@ export async function PATCH(
       crm_action_config?: Record<string, unknown> | null;
     };
     const patch: Record<string, unknown> = {};
-    if (typeof body.node_type === "string") patch.node_type = body.node_type.trim();
+    if (typeof body.node_type === "string") {
+      const nodeType = body.node_type.trim();
+      if (!VALID_NODE_TYPES.includes(nodeType as (typeof VALID_NODE_TYPES)[number])) {
+        return NextResponse.json({ ok: false, error: "node_type inválido" }, { status: 400 });
+      }
+      patch.node_type = nodeType;
+    }
     if ("message_text" in body) patch.message_text = body.message_text ?? null;
     if ("save_as_field" in body) patch.save_as_field = body.save_as_field?.trim() || null;
     if ("next_node_code" in body) patch.next_node_code = body.next_node_code?.trim() || null;
@@ -43,6 +60,36 @@ export async function PATCH(
     }
 
     const supabase = getSupabaseAdmin();
+    const { data: currentNode, error: nodeErr } = await supabase
+      .from("chat_flow_nodes")
+      .select("id, node_type")
+      .eq("empresa_id", auth.empresa_id)
+      .eq("flow_code", params.flowCode)
+      .eq("node_code", params.nodeCode)
+      .maybeSingle();
+    if (nodeErr) return NextResponse.json({ ok: false, error: nodeErr.message }, { status: 400 });
+    if (!currentNode) return NextResponse.json({ ok: false, error: "Nodo no encontrado" }, { status: 404 });
+
+    const targetType = typeof patch.node_type === "string" ? patch.node_type : currentNode.node_type;
+    if (targetType === "media") {
+      const { data: mediaBlocks, error: blockErr } = await supabase
+        .from("chat_flow_node_blocks")
+        .select("media_url")
+        .eq("empresa_id", auth.empresa_id)
+        .eq("node_id", currentNode.id)
+        .eq("block_type", "image")
+        .order("sort_order", { ascending: true })
+        .limit(1);
+      if (blockErr) return NextResponse.json({ ok: false, error: blockErr.message }, { status: 400 });
+      const mediaUrl = (mediaBlocks?.[0]?.media_url as string | null | undefined)?.trim() ?? "";
+      if (!mediaUrl || !isValidHttpUrl(mediaUrl)) {
+        return NextResponse.json(
+          { ok: false, error: "Nodo media requiere un bloque de imagen con URL válida (http/https)." },
+          { status: 400 }
+        );
+      }
+    }
+
     const { data, error } = await supabase
       .from("chat_flow_nodes")
       .update(patch)

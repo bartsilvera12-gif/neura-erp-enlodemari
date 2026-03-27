@@ -57,7 +57,7 @@ export type ChatFlowNodeRow = {
   message_text: string | null;
   save_as_field: string | null;
   next_node_code: string | null;
-  node_type: "buttons" | "list" | "text" | "image_input" | "human" | "end";
+  node_type: "buttons" | "list" | "text" | "media" | "image_input" | "human" | "end";
   is_active: boolean;
   created_at: string;
 };

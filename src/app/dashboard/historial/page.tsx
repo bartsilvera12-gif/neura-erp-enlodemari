@@ -293,7 +293,11 @@ export default function HistorialPage() {
                                 </span>
                               )}
                             </div>
-                            <p className="whitespace-pre-wrap break-words">{msg.content || "—"}</p>
+                            <p className="whitespace-pre-wrap break-words">
+                              {msg.message_type === "image"
+                                ? `Imagen enviada${msg.content ? `\n${msg.content}` : ""}`
+                                : msg.content || "—"}
+                            </p>
                             <p className="text-[10px] opacity-80 mt-1">
                               {fmtDate(msg.created_at)} · {msg.message_type}
                             </p>

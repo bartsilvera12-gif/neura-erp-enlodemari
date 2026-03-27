@@ -52,7 +52,7 @@ type FlowNode = {
   message_text: string | null;
   save_as_field: string | null;
   next_node_code: string | null;
-  node_type: "buttons" | "list" | "text" | "image_input" | "human" | "end";
+  node_type: "buttons" | "list" | "text" | "media" | "image_input" | "human" | "end";
   is_active: boolean;
 };
 
@@ -369,6 +369,31 @@ export function createFlowEngine(ctx: FlowEngineContext) {
           senderType: "system",
           automationSource: "flow_engine",
         });
+      } else if (node.node_type === "media") {
+        const imageFromLegacyText = node.message_text?.trim() || "";
+        if (!imageFromLegacyText) {
+          return {
+            ok: false,
+            error: `Nodo media "${node.node_code}" sin imagen configurada en bloques ni mensaje legacy`,
+          };
+        }
+        const send = await sendWhatsAppImage({
+          toDigits: ctxSend.toDigits,
+          phoneNumberId: ctxSend.phoneNumberId,
+          accessToken: ctxSend.token,
+          imageUrl: imageFromLegacyText,
+        });
+        if (!send.ok) return { ok: false, error: send.error };
+
+        await persistOutgoingMessage({
+          conversation: state,
+          content: `Imagen enviada\n${imageFromLegacyText}`,
+          messageType: "image",
+          waMessageId: send.waMessageId,
+          raw: send.raw,
+          senderType: "system",
+          automationSource: "flow_engine",
+        });
       } else {
         const send = await sendWhatsAppText({
           toDigits: ctxSend.toDigits,
@@ -451,9 +476,10 @@ export function createFlowEngine(ctx: FlowEngineContext) {
           caption,
         });
         if (!send.ok) return { ok: false, error: send.error };
+        const imageLabel = caption ? `Imagen enviada: ${caption}` : "Imagen enviada";
         await persistOutgoingMessage({
           conversation: state,
-          content: caption ? `${caption}\n${imageUrl}` : imageUrl,
+          content: `${imageLabel}\n${imageUrl}`,
           messageType: "image",
           waMessageId: send.waMessageId,
           raw: send.raw,

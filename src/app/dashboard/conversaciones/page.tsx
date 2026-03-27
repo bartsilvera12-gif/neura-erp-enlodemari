@@ -17,6 +17,7 @@ type ChatMessage = {
   message_type: string;
   content: string | null;
   created_at: string;
+  raw_payload?: Record<string, unknown> | null;
 };
 
 function formatTime(iso: string) {
@@ -39,7 +40,26 @@ function mapRowToMessage(row: Record<string, unknown>): ChatMessage {
     message_type: String(row.message_type ?? "text"),
     content: (row.content as string | null) ?? null,
     created_at: String(row.created_at),
+    raw_payload:
+      typeof row.raw_payload === "object" && row.raw_payload !== null
+        ? (row.raw_payload as Record<string, unknown>)
+        : null,
   };
+}
+
+function parseOutgoingImageMessage(message: ChatMessage): { url: string | null; caption: string | null } {
+  const imagePayload = (message.raw_payload?.image as { link?: string; caption?: string } | undefined) ?? {};
+  const link = typeof imagePayload.link === "string" ? imagePayload.link.trim() : "";
+  const captionFromPayload = typeof imagePayload.caption === "string" ? imagePayload.caption.trim() : "";
+  if (link) return { url: link, caption: captionFromPayload || null };
+
+  const lines = (message.content ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const urlLine = lines.find((line) => /^https?:\/\//i.test(line)) ?? null;
+  const captionLine = lines.find((line) => !/^https?:\/\//i.test(line) && !/^Imagen enviada:?/i.test(line)) ?? null;
+  return { url: urlLine, caption: captionLine };
 }
 
 export default function ConversacionesPage() {
@@ -80,7 +100,7 @@ export default function ConversacionesPage() {
     try {
       const { data, error: err } = await supabase
         .from("chat_messages")
-        .select("id, from_me, message_type, content, created_at")
+        .select("id, from_me, message_type, content, raw_payload, created_at")
         .eq("conversation_id", conversationId)
         .order("created_at", { ascending: true });
 
@@ -358,7 +378,34 @@ export default function ConversacionesPage() {
                             : "bg-white border border-slate-200 text-slate-800 rounded-bl-md shadow-sm"
                         }`}
                       >
-                        <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                        {m.message_type === "image" ? (
+                          (() => {
+                            const parsed = parseOutgoingImageMessage(m);
+                            return (
+                              <div className="space-y-2">
+                                <div className={`text-xs font-medium ${m.from_me ? "text-sky-100" : "text-slate-500"}`}>
+                                  Imagen enviada
+                                </div>
+                                {parsed.url ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={parsed.url}
+                                    alt="Imagen enviada"
+                                    className="max-h-52 rounded-lg border border-white/30 bg-white object-contain"
+                                  />
+                                ) : null}
+                                {parsed.caption ? (
+                                  <p className="whitespace-pre-wrap break-words">{parsed.caption}</p>
+                                ) : null}
+                                {!parsed.url && !parsed.caption ? (
+                                  <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                                ) : null}
+                              </div>
+                            );
+                          })()
+                        ) : (
+                          <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                        )}
                         <p
                           className={`text-[10px] mt-1 ${m.from_me ? "text-sky-100" : "text-slate-400"}`}
                         >

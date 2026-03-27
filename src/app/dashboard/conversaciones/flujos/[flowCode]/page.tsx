@@ -37,6 +37,27 @@ type FlowNode = {
   blocks: FlowNodeBlock[];
 };
 
+const NODE_TYPE_OPTIONS = [
+  { value: "text", label: "Texto libre", help: "Espera respuesta de texto del cliente." },
+  { value: "media", label: "Imagen saliente", help: "Envía imagen con caption opcional." },
+  { value: "buttons", label: "Botones", help: "Muestra botones rápidos al cliente." },
+  { value: "list", label: "Lista", help: "Interacción tipo lista (catálogo de opciones)." },
+  { value: "image_input", label: "Solicitar imagen", help: "Espera imagen/comprobante del cliente." },
+  { value: "human", label: "Derivar a humano", help: "Pasa la conversación a atención humana." },
+  { value: "end", label: "Finalizar", help: "Cierra la automatización del flujo." },
+] as const;
+
+const MAX_WHATSAPP_IMAGE_CAPTION = 1024;
+
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === "https:" || u.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 function prettifyCode(code: string): string {
   return code
     .replace(/[_-]+/g, " ")
@@ -46,28 +67,34 @@ function prettifyCode(code: string): string {
 }
 
 function friendlyNodeTitle(node: FlowNode): string {
+  if (node.node_type === "media") {
+    const mediaCaption = node.blocks.find((b) => b.block_type === "image")?.content_text?.trim();
+    if (mediaCaption) return `Imagen: ${mediaCaption.slice(0, 34)}${mediaCaption.length > 34 ? "..." : ""}`;
+    return "Imagen saliente";
+  }
   const txt = node.message_text?.trim();
   if (txt) return txt.slice(0, 42) + (txt.length > 42 ? "..." : "");
   return prettifyCode(node.node_code);
 }
 
 function nodeTypeLabel(nodeType: string): string {
-  switch (nodeType) {
-    case "buttons":
-      return "Botones";
-    case "list":
-      return "Lista";
-    case "text":
-      return "Texto libre";
-    case "image_input":
-      return "Imagen";
-    case "human":
-      return "Derivar a humano";
-    case "end":
-      return "Finalizar";
-    default:
-      return nodeType;
-  }
+  return NODE_TYPE_OPTIONS.find((n) => n.value === nodeType)?.label ?? nodeType;
+}
+
+function nodeTypeHelp(nodeType: string): string {
+  return (
+    NODE_TYPE_OPTIONS.find((n) => n.value === nodeType)?.help ??
+    "Configurá este paso según la experiencia del cliente."
+  );
+}
+
+function nodeAccent(nodeType: string): string {
+  if (nodeType === "media") return "border-l-fuchsia-400";
+  if (nodeType === "buttons" || nodeType === "list") return "border-l-sky-400";
+  if (nodeType === "human") return "border-l-amber-400";
+  if (nodeType === "end") return "border-l-emerald-400";
+  if (nodeType === "image_input") return "border-l-violet-400";
+  return "border-l-slate-300";
 }
 
 function toMetaButtonId(label: string): string {
@@ -134,6 +161,16 @@ export default function FlowEditorPage() {
 
   const nodeCodes = useMemo(() => orderedNodes.map((n) => n.node_code), [orderedNodes]);
 
+  function getImageBlock(node: FlowNode): FlowNodeBlock | undefined {
+    return node.blocks.find((b) => b.block_type === "image");
+  }
+
+  function getTextPreview(node: FlowNode): string {
+    const blockText = node.blocks.find((b) => b.block_type === "text")?.content_text?.trim();
+    if (blockText) return blockText;
+    return node.message_text?.trim() || "Sin texto de vista previa";
+  }
+
   function nextStepLabel(nextNodeCode: string | null): string {
     if (!nextNodeCode) return "Sin siguiente paso";
     const target = nodeByCode.get(nextNodeCode);
@@ -196,6 +233,17 @@ export default function FlowEditorPage() {
 
   async function saveNode(node: FlowNode) {
     setError(null);
+    if (node.node_type === "media") {
+      const mediaBlock = getImageBlock(node);
+      const mediaUrl = mediaBlock?.media_url?.trim() ?? "";
+      const captionSize = (mediaBlock?.content_text ?? "").trim().length;
+      if (!mediaUrl || !isValidHttpUrl(mediaUrl)) {
+        throw new Error("El nodo 'Imagen saliente' requiere una URL válida en su bloque de imagen.");
+      }
+      if (captionSize > MAX_WHATSAPP_IMAGE_CAPTION) {
+        throw new Error(`El caption supera ${MAX_WHATSAPP_IMAGE_CAPTION} caracteres.`);
+      }
+    }
     const res = await fetch(
       `/api/chat/flows/${encodeURIComponent(flowCode)}/nodes/${encodeURIComponent(node.node_code)}`,
       {
@@ -348,21 +396,19 @@ export default function FlowEditorPage() {
       {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{error}</div>}
       {success && <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2">{success}</div>}
 
-      <form onSubmit={createNode} className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap gap-3 items-end">
+      <form onSubmit={createNode} className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap gap-3 items-end shadow-sm">
         <div className="flex-1 min-w-[180px]">
           <label className="block text-xs text-slate-500 mb-1">Nombre del paso (código interno)</label>
           <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" value={newNodeCode} onChange={(e) => setNewNodeCode(e.target.value)} placeholder="ej: datos_pago" />
         </div>
         <div className="min-w-[180px]">
-          <label className="block text-xs text-slate-500 mb-1">Tipo de interacción</label>
+          <label className="block text-xs text-slate-500 mb-1">Tipo de nodo</label>
           <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" value={newNodeType} onChange={(e) => setNewNodeType(e.target.value)}>
-            <option value="buttons">buttons</option>
-            <option value="list">list</option>
-            <option value="text">text</option>
-            <option value="image_input">image_input</option>
-            <option value="human">human</option>
-            <option value="end">end</option>
+            {NODE_TYPE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
           </select>
+          <p className="mt-1 text-[11px] text-slate-500">{nodeTypeHelp(newNodeType)}</p>
         </div>
         <button type="submit" className="bg-[#0EA5E9] hover:bg-[#0284C7] text-white px-4 py-2 rounded-lg text-sm font-medium">Crear nodo</button>
       </form>
@@ -372,11 +418,11 @@ export default function FlowEditorPage() {
       ) : (
         <div className="space-y-4">
           {orderedNodes.map((node, idx) => (
-            <div key={node.id} className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+            <div key={node.id} className={`bg-white border border-slate-200 border-l-4 ${nodeAccent(node.node_type)} rounded-xl p-4 space-y-3 shadow-sm`}>
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-sm font-semibold text-slate-800">Paso #{idx + 1}: {friendlyNodeTitle(node)}</div>
-                  <div className="text-xs text-slate-500">Tipo: {nodeTypeLabel(node.node_type)}</div>
+                  <div className="text-xs text-slate-500">Tipo: {nodeTypeLabel(node.node_type)} · {nodeTypeHelp(node.node_type)}</div>
                 </div>
                 <label className="text-sm text-slate-700 flex items-center gap-2">
                   <input type="checkbox" checked={node.is_active} onChange={(e) => setNodes((prev) => prev.map((n) => n.id === node.id ? { ...n, is_active: e.target.checked } : n))} />
@@ -390,14 +436,11 @@ export default function FlowEditorPage() {
                   <input className="border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono w-full" value={node.node_code} readOnly />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">Tipo de interacción</label>
+                  <label className="block text-xs text-slate-500 mb-1">Tipo de nodo</label>
                   <select className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-full" value={node.node_type} onChange={(e) => setNodes((prev) => prev.map((n) => n.id === node.id ? { ...n, node_type: e.target.value } : n))}>
-                    <option value="buttons">Botones</option>
-                    <option value="list">Lista</option>
-                    <option value="text">Texto libre</option>
-                    <option value="image_input">Imagen</option>
-                    <option value="human">Derivar a humano</option>
-                    <option value="end">Finalizar</option>
+                    {NODE_TYPE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -411,13 +454,44 @@ export default function FlowEditorPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Mensaje al cliente (compatibilidad)</label>
-                <textarea className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm min-h-[74px]" placeholder="Se usa solo en nodos sin bloques configurados" value={node.message_text ?? ""} onChange={(e) => setNodes((prev) => prev.map((n) => n.id === node.id ? { ...n, message_text: e.target.value } : n))} />
-              </div>
+              {node.node_type !== "media" && (
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Mensaje al cliente (compatibilidad)</label>
+                  <textarea className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm min-h-[74px]" placeholder="Se usa solo en nodos sin bloques configurados" value={node.message_text ?? ""} onChange={(e) => setNodes((prev) => prev.map((n) => n.id === node.id ? { ...n, message_text: e.target.value } : n))} />
+                </div>
+              )}
 
               <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
                 Este paso va a → <span className="font-medium text-slate-800">{nextStepLabel(node.next_node_code)}</span>
+              </div>
+
+              <div className="border border-slate-100 rounded-lg p-3 bg-slate-50/60 text-xs text-slate-600">
+                {node.node_type === "media" ? (
+                  (() => {
+                    const mediaBlock = getImageBlock(node);
+                    const mediaUrl = mediaBlock?.media_url?.trim() ?? "";
+                    const caption = mediaBlock?.content_text?.trim() ?? "";
+                    return (
+                      <div className="space-y-2">
+                        <div className="font-semibold uppercase text-[11px] text-slate-500">Vista previa del nodo</div>
+                        <div>{caption || "Imagen sin caption"}</div>
+                        {mediaUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={mediaUrl} alt="Preview media" className="max-h-36 rounded border border-slate-200 bg-white" />
+                        ) : (
+                          <div className="text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                            Falta URL de imagen.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <div>
+                    <div className="font-semibold uppercase text-[11px] text-slate-500 mb-1">Vista previa del mensaje</div>
+                    {getTextPreview(node)}
+                  </div>
+                )}
               </div>
 
               <details className="border border-slate-100 rounded-lg p-3 bg-slate-50/60">
@@ -436,21 +510,41 @@ export default function FlowEditorPage() {
 
               <div className="border border-slate-100 rounded-lg p-3 space-y-3 bg-slate-50/60">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs font-semibold text-slate-600 uppercase">Bloques del mensaje</div>
+                  <div className="text-xs font-semibold text-slate-600 uppercase">
+                    {node.node_type === "media" ? "Bloque de imagen saliente" : "Bloques del mensaje"}
+                  </div>
                   <div className="flex gap-2">
-                    <button type="button" className="text-xs text-[#0EA5E9] hover:underline" onClick={async () => {
-                      try { await createBlock(node, "text"); await reload(); } catch (e) { setError(e instanceof Error ? e.message : "Error"); }
-                    }}>+ Texto</button>
+                    {node.node_type !== "media" && (
+                      <button type="button" className="text-xs text-[#0EA5E9] hover:underline" onClick={async () => {
+                        try { await createBlock(node, "text"); await reload(); } catch (e) { setError(e instanceof Error ? e.message : "Error"); }
+                      }}>+ Texto</button>
+                    )}
                     <button type="button" className="text-xs text-[#0EA5E9] hover:underline" onClick={async () => {
                       try { await createBlock(node, "image"); await reload(); } catch (e) { setError(e instanceof Error ? e.message : "Error"); }
                     }}>+ Imagen</button>
-                    <button type="button" className="text-xs text-[#0EA5E9] hover:underline" onClick={async () => {
-                      try { await createBlock(node, "buttons"); await reload(); } catch (e) { setError(e instanceof Error ? e.message : "Error"); }
-                    }}>+ Botones</button>
+                    {node.node_type !== "media" && (
+                      <button type="button" className="text-xs text-[#0EA5E9] hover:underline" onClick={async () => {
+                        try { await createBlock(node, "buttons"); await reload(); } catch (e) { setError(e instanceof Error ? e.message : "Error"); }
+                      }}>+ Botones</button>
+                    )}
                   </div>
                 </div>
-                {node.blocks.length === 0 && <div className="text-xs text-slate-500">Sin bloques. Se usará el mensaje de compatibilidad.</div>}
-                {node.blocks.map((block, bi) => (
+                {node.blocks.length === 0 && (
+                  <div className="text-xs text-slate-500">
+                    {node.node_type === "media"
+                      ? "Este nodo necesita un bloque de imagen con URL válida."
+                      : "Sin bloques. Se usará el mensaje de compatibilidad."}
+                  </div>
+                )}
+                {node.node_type === "media" && node.blocks.some((b) => b.block_type !== "image") && (
+                  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                    Este nodo usa solo bloques de imagen; los demás bloques se ignoran en la vista.
+                  </div>
+                )}
+                {(node.node_type === "media"
+                  ? node.blocks.filter((b) => b.block_type === "image")
+                  : node.blocks
+                ).map((block, bi) => (
                   <div key={block.id} className="bg-white border border-slate-200 rounded-lg p-3 space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="text-xs text-slate-500">Bloque #{bi + 1} ({block.block_type})</div>
@@ -488,6 +582,9 @@ export default function FlowEditorPage() {
                     )}
                     {block.block_type === "image" && (
                       <div className="space-y-2">
+                        <p className="text-[11px] text-slate-500">
+                          Podés subir una imagen o pegar una URL pública (http/https).
+                        </p>
                         <input type="file" accept="image/*" onChange={async (e) => {
                           try {
                             const file = e.target.files?.[0];
@@ -506,12 +603,18 @@ export default function FlowEditorPage() {
                           placeholder="URL pública de imagen"
                           onChange={(e) => setNodes((prev) => prev.map((n) => n.id !== node.id ? n : ({ ...n, blocks: n.blocks.map((b) => b.id === block.id ? { ...b, media_url: e.target.value } : b) })))}
                         />
+                        {!!block.media_url && !isValidHttpUrl(block.media_url) && (
+                          <div className="text-[11px] text-red-600">La URL debe iniciar con http:// o https://</div>
+                        )}
                         <input
                           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
                           value={block.content_text ?? ""}
                           placeholder="Caption opcional"
                           onChange={(e) => setNodes((prev) => prev.map((n) => n.id !== node.id ? n : ({ ...n, blocks: n.blocks.map((b) => b.id === block.id ? { ...b, content_text: e.target.value } : b) })))}
                         />
+                        <div className={`text-[11px] ${(block.content_text ?? "").length > MAX_WHATSAPP_IMAGE_CAPTION ? "text-red-600" : "text-slate-500"}`}>
+                          Caption: {(block.content_text ?? "").length}/{MAX_WHATSAPP_IMAGE_CAPTION}
+                        </div>
                         {block.media_url && <img src={block.media_url} alt="preview" className="max-h-40 rounded border border-slate-200" />}
                       </div>
                     )}
@@ -528,6 +631,16 @@ export default function FlowEditorPage() {
                         const latestNode = nodes.find((n) => n.id === node.id);
                         const latestBlock = latestNode?.blocks.find((b) => b.id === block.id);
                         if (!latestBlock) return;
+                        if (latestBlock.block_type === "image") {
+                          const mediaUrl = latestBlock.media_url?.trim() ?? "";
+                          const caption = latestBlock.content_text?.trim() ?? "";
+                          if (mediaUrl && !isValidHttpUrl(mediaUrl)) {
+                            throw new Error("La URL de imagen debe ser http/https.");
+                          }
+                          if (caption.length > MAX_WHATSAPP_IMAGE_CAPTION) {
+                            throw new Error(`El caption supera ${MAX_WHATSAPP_IMAGE_CAPTION} caracteres.`);
+                          }
+                        }
                         await saveBlock(node, latestBlock);
                         setSuccess("Bloque guardado.");
                         await reload();
@@ -554,14 +667,18 @@ export default function FlowEditorPage() {
                 Guardar paso
               </button>
 
-              {node.node_type === "buttons" && (
+              {(node.node_type === "buttons" || node.node_type === "list") && (
                 <div className="border border-slate-100 rounded-lg p-3 space-y-2 bg-slate-50/60">
-                  <div className="text-xs font-semibold text-slate-600 uppercase">Botones del cliente</div>
+                  <div className="text-xs font-semibold text-slate-600 uppercase">
+                    {node.node_type === "list" ? "Opciones de lista del cliente" : "Botones del cliente"}
+                  </div>
                   {node.options.map((opt) => (
                     <div key={opt.id} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center">
                       <div className="md:col-span-2">
-                        <label className="block text-xs text-slate-500 mb-1">Texto del botón</label>
-                        <input className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm w-full" value={opt.label} onChange={(e) => setNodes((prev) => prev.map((n) => n.id !== node.id ? n : ({ ...n, options: n.options.map((o) => o.id === opt.id ? { ...o, label: e.target.value } : o) } )))} placeholder="Ej: Comprar entrada" />
+                        <label className="block text-xs text-slate-500 mb-1">
+                          {node.node_type === "list" ? "Texto de la opción" : "Texto del botón"}
+                        </label>
+                        <input className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm w-full" value={opt.label} onChange={(e) => setNodes((prev) => prev.map((n) => n.id !== node.id ? n : ({ ...n, options: n.options.map((o) => o.id === opt.id ? { ...o, label: e.target.value } : o) } )))} placeholder={node.node_type === "list" ? "Ej: Plan Premium" : "Ej: Comprar entrada"} />
                       </div>
                       <div>
                         <label className="block text-xs text-slate-500 mb-1">Va a</label>
@@ -580,7 +697,7 @@ export default function FlowEditorPage() {
                               await saveOption(node, opt);
                               await reload();
                             } catch (e) {
-                              setError(e instanceof Error ? e.message : "Error al guardar botón");
+                              setError(e instanceof Error ? e.message : "Error al guardar opción");
                             }
                           }}
                           className="text-[#0EA5E9] hover:underline text-sm"
@@ -594,7 +711,7 @@ export default function FlowEditorPage() {
                               await deleteOption(node, opt.id);
                               await reload();
                             } catch (e) {
-                              setError(e instanceof Error ? e.message : "Error al eliminar botón");
+                              setError(e instanceof Error ? e.message : "Error al eliminar opción");
                             }
                           }}
                           className="text-red-600 hover:underline text-sm"
@@ -603,7 +720,7 @@ export default function FlowEditorPage() {
                         </button>
                       </div>
                       <div className="md:col-span-4 text-xs text-slate-500 bg-white border border-slate-200 rounded px-2 py-1">
-                        Botón: "{opt.label}" → va a: "{nextStepLabel(opt.next_node_code)}"
+                        {node.node_type === "list" ? "Opción" : "Botón"}: "{opt.label}" → va a: "{nextStepLabel(opt.next_node_code)}"
                       </div>
                     </div>
                   ))}
@@ -614,12 +731,12 @@ export default function FlowEditorPage() {
                         await createOption(node);
                         await reload();
                       } catch (e) {
-                        setError(e instanceof Error ? e.message : "Error al crear botón");
+                        setError(e instanceof Error ? e.message : "Error al crear opción");
                       }
                     }}
                     className="text-sm text-[#0EA5E9] hover:underline"
                   >
-                    + Agregar botón
+                    {node.node_type === "list" ? "+ Agregar opción" : "+ Agregar botón"}
                   </button>
                 </div>
               )}

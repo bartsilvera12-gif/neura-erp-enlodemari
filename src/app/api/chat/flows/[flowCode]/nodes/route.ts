@@ -9,6 +9,8 @@ function getSupabaseAdmin() {
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
 }
 
+const VALID_NODE_TYPES = ["buttons", "list", "text", "media", "image_input", "human", "end"] as const;
+
 export async function GET(
   _request: NextRequest,
   context: { params: Promise<{ flowCode: string }> }
@@ -106,6 +108,9 @@ export async function POST(
     const nodeType = (body.node_type ?? "").trim();
     if (!nodeCode || !nodeType) {
       return NextResponse.json({ ok: false, error: "node_code y node_type requeridos" }, { status: 400 });
+    }
+    if (!VALID_NODE_TYPES.includes(nodeType as (typeof VALID_NODE_TYPES)[number])) {
+      return NextResponse.json({ ok: false, error: "node_type inválido" }, { status: 400 });
     }
     const supabase = getSupabaseAdmin();
     const { data, error } = await supabase

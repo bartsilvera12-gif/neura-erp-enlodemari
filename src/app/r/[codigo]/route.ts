@@ -8,6 +8,67 @@ function digitsOnly(s: string): string {
   return s.replace(/\D/g, "");
 }
 
+async function resolveRedirectPhoneForEmpresa(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  empresaId: string
+): Promise<{ ok: true; phone: string } | { ok: false; message: string }> {
+  const envPhone = digitsOnly(
+    process.env.WHATSAPP_LINK_PHONE_NUMBER?.trim() ||
+      process.env.NEXT_PUBLIC_WHATSAPP_LINK_PHONE_NUMBER?.trim() ||
+      ""
+  );
+
+  const { data: channels, error: chErr } = await supabase
+    .from("chat_channels")
+    .select("id, activo, config")
+    .eq("empresa_id", empresaId)
+    .eq("type", "whatsapp")
+    .eq("activo", true);
+
+  if (chErr) {
+    return { ok: false, message: `No se pudo validar el canal WhatsApp: ${chErr.message}` };
+  }
+
+  const numbers = new Set<string>();
+  for (const ch of channels ?? []) {
+    const cfg = (ch as { config?: unknown }).config;
+    if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) continue;
+    const raw = (cfg as Record<string, unknown>).display_phone_number;
+    if (typeof raw !== "string") continue;
+    const d = digitsOnly(raw);
+    if (d.length >= 8) numbers.add(d);
+  }
+
+  if (numbers.size === 0) {
+    return {
+      ok: false,
+      message:
+        "No hay display_phone_number válido en chat_channels activos. Configurá el número visible del canal WhatsApp.",
+    };
+  }
+
+  if (envPhone) {
+    if (!numbers.has(envPhone)) {
+      return {
+        ok: false,
+        message:
+          "WHATSAPP_LINK_PHONE_NUMBER no coincide con ningún chat_channels activo de la empresa.",
+      };
+    }
+    return { ok: true, phone: envPhone };
+  }
+
+  if (numbers.size === 1) {
+    return { ok: true, phone: [...numbers][0] };
+  }
+
+  return {
+    ok: false,
+    message:
+      "Hay múltiples canales activos con distintos display_phone_number. Definí WHATSAPP_LINK_PHONE_NUMBER para elegir uno válido.",
+  };
+}
+
 /**
  * Landing pública: registra click + token opaco y redirige a WhatsApp.
  * URL oficial: /r/{codigo}?sorteo={uuid}
@@ -24,18 +85,6 @@ export async function GET(
       status: 400,
       headers: { "content-type": "text/plain; charset=utf-8" },
     });
-  }
-
-  const phone = digitsOnly(
-    process.env.WHATSAPP_LINK_PHONE_NUMBER?.trim() ||
-      process.env.NEXT_PUBLIC_WHATSAPP_LINK_PHONE_NUMBER?.trim() ||
-      ""
-  );
-  if (!phone || phone.length < 8) {
-    return new NextResponse(
-      "Configurá WHATSAPP_LINK_PHONE_NUMBER en el servidor (E.164 sin +, ej. 595981234567).",
-      { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } }
-    );
   }
 
   let supabase;
@@ -71,6 +120,14 @@ export async function GET(
     activo: boolean;
   };
 
+  const redirectPhoneResult = await resolveRedirectPhoneForEmpresa(supabase, row.empresa_id);
+  if (!redirectPhoneResult.ok) {
+    return new NextResponse(redirectPhoneResult.message, {
+      status: 503,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
+  }
+
   const token = randomBytes(18).toString("base64url");
   const ua = request.headers.get("user-agent") ?? "";
   const ip =
@@ -100,6 +157,6 @@ export async function GET(
   }
 
   const text = `Hola quiero comprar boletas ref=${token}`;
-  const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+  const waUrl = `https://wa.me/${redirectPhoneResult.phone}?text=${encodeURIComponent(text)}`;
   return NextResponse.redirect(waUrl, 302);
 }

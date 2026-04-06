@@ -135,6 +135,20 @@ function escalaE8AStringDecimal(scaled: bigint): string {
 }
 
 /**
+ * Total valor operación por ítem en PYG según `facturacionelectronicapy-xmlgen` (TIPS):
+ * `(cant×precio).toFixed(decimals)` → `parseFloat` → `.toFixed(pygDecimals)` con defaults `2` y `0`.
+ * La SET suele validar con la misma lógica; si no coincide, aparece el 1858.
+ */
+const SIFEN_PY_VALOR_ITEM_INTERMEDIATE_DECIMALS = 2;
+
+function totalValorOperacionItemPygSegunTips(cantStr: string, precioStr: string): number {
+  let x = parseFloat(precioStr) * parseFloat(cantStr);
+  if (!Number.isFinite(x)) x = 0;
+  x = parseFloat(x.toFixed(SIFEN_PY_VALOR_ITEM_INTERMEDIATE_DECIMALS));
+  return parseFloat(x.toFixed(0));
+}
+
+/**
  * Precio unitario (×10⁸ entero) tal que redondeo half-up de (cant×precio) a guaraníes enteros = T.
  * Evita 1858 cuando la SET valida cant×precio en decimal fijo (p. ej. 3×3333.33333333≠10000).
  */
@@ -150,6 +164,34 @@ function precioUnitarioE8DesdeTotalGuaranies(T: number, cantE8: bigint): bigint 
   const pMax = hi / Q;
   if (pMin <= pMax) return pMin;
   throw new Error(`SIFEN ítem: total ${T} incompatible con cantidad (escala ${Q}) para precio unitario`);
+}
+
+/**
+ * `dPUniProSer` + totales de línea alineados al redondeo TIPS (1858).
+ * Prioriza `precio_unitario` del ERP si ya cierra con `total` y cantidad.
+ */
+function resolverPrecioYTotalesValorItemPyg(
+  precioUnitarioErp: number,
+  totalLineaGs: number,
+  dCantStr: string,
+  cantE8: bigint
+): { dPUniStr: string; dTotOpeItem: number } {
+  const T = Math.max(0, Math.round(totalLineaGs));
+  const erpStr = formatDecimalSifen(precioUnitarioErp);
+  if (totalValorOperacionItemPygSegunTips(dCantStr, erpStr) === T) {
+    return { dPUniStr: erpStr, dTotOpeItem: T };
+  }
+  const pE8 = precioUnitarioE8DesdeTotalGuaranies(T, cantE8);
+  for (let i = -5000; i <= 5000; i++) {
+    const P = pE8 + BigInt(i);
+    if (P <= SIFEN_BI0) continue;
+    const ps = escalaE8AStringDecimal(P);
+    const tot = totalValorOperacionItemPygSegunTips(dCantStr, ps);
+    if (tot === T) return { dPUniStr: ps, dTotOpeItem: tot };
+  }
+  throw new Error(
+    `SIFEN ítem: total línea ${T} Gs y cantidad ${dCantStr} no admiten precio unitario (≤8 dec.) que cierre con el redondeo oficial (cant×precio). Corregí cantidad o totales en la factura.`
+  );
 }
 
 /** `tdDesAfecIVA`: solo coinciden textos fijos del XSD (la tasa va en `dTasaIVA`). */
@@ -394,19 +436,18 @@ export function buildOfficialRdeFacturaElectronicaXml(
 
   items.forEach((it, idx) => {
     const tasa = inferirTasaIva(it.subtotal, it.iva);
-    /** Total línea en guaraníes (con IVA incluido en el precio al público, modelo SET). */
-    const dTotOpeItem = Math.round(it.total);
     const cantNum = cantidadProSerValida(Number(it.cantidad));
     const cantStrNorm = formatDecimalSifen(cantNum);
     let cantE8 = decimalStringAEscalaE8(cantStrNorm);
     if (cantE8 <= SIFEN_BI0) cantE8 = SIFEN_E8;
     const dCantStr = escalaE8AStringDecimal(cantE8);
-    /**
-     * SET (1858): cant×precio en decimales del DE debe cerrar al total en guaraníes.
-     * Precio unitario en escala 10⁻⁸ para que redondeo half-up de (cant×precio) = T.
-     */
-    const dPUniE8 = precioUnitarioE8DesdeTotalGuaranies(dTotOpeItem, cantE8);
-    const dPUniStr = escalaE8AStringDecimal(dPUniE8);
+    /** 1858: misma cadena de redondeo que TIPS (`jsonDteItem.service.ts`) + precio coherente. */
+    const { dPUniStr, dTotOpeItem } = resolverPrecioYTotalesValorItemPyg(
+      it.precio_unitario,
+      it.total,
+      dCantStr,
+      cantE8
+    );
     const dTotBruOpeItem = dTotOpeItem;
 
     let baseGrav = 0;
@@ -447,7 +488,7 @@ export function buildOfficialRdeFacturaElectronicaXml(
     itemsXml.push("<gValorRestaItem>");
     itemsXml.push(textEl("dDescItem", "0"));
     itemsXml.push(textEl("dTotOpeItem", dTotOpeItem));
-    itemsXml.push(textEl("dTotOpeGs", dTotOpeItem));
+    /** PYG sin tipo de cambio por ítem: TIPS no informa `dTotOpeGs` (solo si `condicionTipoCambio==2`). */
     itemsXml.push("</gValorRestaItem>");
     itemsXml.push("</gValorItem>");
     itemsXml.push("<gCamIVA>");

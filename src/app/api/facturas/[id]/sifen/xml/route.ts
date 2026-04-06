@@ -25,8 +25,11 @@ function getSupabase() {
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
 }
 
-/** `firmado` permite regenerar (p. ej. migrar borrador legacy → rDE); la firma previa se invalida en DB y en Storage. */
-const ESTADOS_BLOQUEADOS_XML = new Set<string>(["aprobado", "enviado"]);
+/**
+ * Solo `aprobado` bloquea regeneración. `enviado` permite corregir y volver a firmar si el lote falla
+ * (p. ej. 1858) sin depender de que la consulta-lote haya actualizado ya el estado en BD.
+ */
+const ESTADOS_BLOQUEADOS_XML = new Set<string>(["aprobado"]);
 
 /**
  * POST /api/facturas/[id]/sifen/xml

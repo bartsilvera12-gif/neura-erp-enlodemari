@@ -197,7 +197,8 @@ function EstadoEmisionElectronicaBlock({ resumen }: { resumen: Resumen }) {
   );
 }
 
-const XML_BLOQUEADOS = new Set(["aprobado", "enviado"]);
+/** Alineado a POST …/sifen/xml: se puede regenerar en `enviado` para corregir DE rechazado o pendiente. */
+const XML_BLOQUEADOS = new Set(["aprobado"]);
 const FIRMAR_BLOQUEADOS = new Set(["aprobado", "enviado"]);
 
 /** Texto cuando consulta-lote no trae `gResProcLote` (0365 ≠ “sigue en cola”). */

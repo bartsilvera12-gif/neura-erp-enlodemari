@@ -498,7 +498,12 @@ export function buildOfficialRdeFacturaElectronicaXml(
     itemsXml.push(textEl("dTasaIVA", tasa));
     itemsXml.push(textEl("dBasGravIVA", baseGrav));
     itemsXml.push(textEl("dLiqIVAItem", dLiq));
-    itemsXml.push(textEl("dBasExe", tasa === 0 ? dTotOpeItem : 0));
+    /**
+     * E737 `dBasExe`: según NT13 / TIPS (`jsonDteItem.service.ts`), para iAfecIVA 1, 2 o 3 debe ser **0**.
+     * Solo 4 (gravado parcial) usa fórmula con parte exenta; el monto exento por línea no va aquí (1921 si se informa mal).
+     * Los totales exentos del DE siguen en `gTotSub.dSubExe` sumando `dTotOpeItem` de ítems exentos.
+     */
+    itemsXml.push(textEl("dBasExe", 0));
     itemsXml.push("</gCamIVA>");
     itemsXml.push("</gCamItem>");
   });

@@ -4,6 +4,7 @@ import { getUserAndEmpresa } from "@/lib/middleware/auth";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
 import { emitEvent, EVENT_TYPES } from "@/lib/integrations/events";
+import { crearFacturaInicialSuscripcionSiCorresponde } from "@/lib/facturacion/factura-suscripcion-servidor";
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -92,6 +93,22 @@ export async function POST(request: NextRequest) {
 
     console.log("[API] About to emit event");
     await emitEvent(EVENT_TYPES.suscripcion_creada, { suscripcion_id: data.id, cliente_id: data.cliente_id });
+
+    if (insert.generar_factura_este_mes) {
+      await crearFacturaInicialSuscripcionSiCorresponde({
+        supabase,
+        empresaId: auth.empresa_id,
+        suscripcion: {
+          id: data.id,
+          cliente_id: data.cliente_id,
+          plan_id: data.plan_id,
+          precio: Number(data.precio),
+          moneda: data.moneda,
+          dia_facturacion: data.dia_facturacion,
+          dia_vencimiento: data.dia_vencimiento,
+        },
+      });
+    }
 
     return NextResponse.json(successResponse(data));
   } catch (err) {

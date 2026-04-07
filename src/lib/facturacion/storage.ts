@@ -326,9 +326,16 @@ export async function savePago(datos: NuevoPagoData): Promise<Pago | null> {
 
   if (!factura) return null;
 
+  const estado = String(factura.estado ?? "Pendiente");
+  if (estado === "Anulado") return null;
+  if (estado === "Pagado" && Number(factura.saldo) <= 0) return null;
+
   const saldoActual = Number(factura.saldo);
+  if (datos.monto > saldoActual) return null;
+
   const nuevoSaldo = Math.max(0, saldoActual - datos.monto);
-  const nuevoEstado = nuevoSaldo <= 0 ? "Pagado" : "Pendiente";
+  const nuevoEstado =
+    nuevoSaldo <= 0 ? "Pagado" : estado === "Vencido" ? "Vencido" : "Pendiente";
 
   const { data, error } = await supabase
     .from("pagos")
@@ -350,7 +357,7 @@ export async function savePago(datos: NuevoPagoData): Promise<Pago | null> {
 
   await supabase
     .from("facturas")
-    .update({ saldo: nuevoSaldo, estado: nuevoEstado })
+    .update({ saldo: nuevoSaldo, estado: nuevoEstado, updated_at: new Date().toISOString() })
     .eq("id", datos.factura_id);
 
   return {

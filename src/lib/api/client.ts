@@ -36,12 +36,15 @@ export async function apiCreateCliente(data: {
   return result.success ? result.data : null;
 }
 
-/** Obtiene datos previos para dar de baja (suscripciones, factura pendiente). */
-export async function apiGetBajaOperativaPreview(clienteId: string): Promise<{
+export type BajaOperativaPreview = {
   suscripciones_activas: number;
+  facturas_pendientes_count?: number;
   factura_pendiente_mes: { id: string; numero_factura: string; monto: number } | null;
   suscripciones: { id: string; precio: number; moneda: string }[];
-} | null> {
+};
+
+/** Obtiene datos previos para dar de baja (suscripciones, facturas con saldo). */
+export async function apiGetBajaOperativaPreview(clienteId: string): Promise<BajaOperativaPreview | null> {
   const res = await fetch(`/api/clientes/${clienteId}/baja-operativa`);
   const json = await res.json();
   if (!res.ok) return null;

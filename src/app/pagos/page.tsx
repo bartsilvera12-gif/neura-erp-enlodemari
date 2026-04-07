@@ -33,7 +33,7 @@ interface PagoCobrado {
 export default function PagosPage() {
   const [tab, setTab] = useState<TabPagos>("pendientes");
   const [facturas, setFacturas] = useState<Factura[]>([]);
-  const [clientes, setClientes] = useState<{ id: string; nombre: string }[]>([]);
+  const [clientes, setClientes] = useState<{ id: string; nombre: string; estado: string }[]>([]);
   const [cobrados, setCobrados] = useState<PagoCobrado[]>([]);
   const [cargandoCobrados, setCargandoCobrados] = useState(false);
   const [modalPago, setModalPago] = useState(false);
@@ -43,7 +43,15 @@ export default function PagosPage() {
 
   useEffect(() => {
     getFacturas().then(setFacturas);
-    getClientes().then((c) => setClientes(c.map((x) => ({ id: x.id, nombre: (x.empresa ?? x.nombre_contacto) || "—" }))));
+    getClientes().then((c) =>
+      setClientes(
+        c.map((x) => ({
+          id: x.id,
+          nombre: (x.empresa ?? x.nombre_contacto) || "—",
+          estado: x.estado ?? "activo",
+        }))
+      )
+    );
   }, []);
 
   async function fetchCobrados() {
@@ -78,7 +86,12 @@ export default function PagosPage() {
     if (tab === "cobrados") fetchCobrados();
   }, [tab]);
 
-  const pendientes = facturas.filter((f) => f.saldo > 0);
+  const pendientes = facturas.filter((f) => {
+    if (f.saldo <= 0 || f.estado === "Anulado") return false;
+    const cli = clientes.find((c) => c.id === f.cliente_id);
+    if (cli?.estado === "inactivo") return false;
+    return true;
+  });
   const clienteMap = Object.fromEntries(clientes.map((c) => [c.id, c.nombre]));
 
   async function handleRegistrarPago(e: React.FormEvent) {

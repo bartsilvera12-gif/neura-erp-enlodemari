@@ -11,7 +11,12 @@ import {
   toggleEstado,
   updateCliente,
 } from "@/lib/clientes/storage";
-import { apiDeleteCliente, apiGetBajaOperativaPreview, apiBajaOperativaCliente } from "@/lib/api/client";
+import {
+  apiDeleteCliente,
+  apiGetBajaOperativaPreview,
+  apiBajaOperativaCliente,
+  type BajaOperativaPreview,
+} from "@/lib/api/client";
 import { getFacturas, getSuscripciones } from "@/lib/facturacion/storage";
 import { getMarketingTasks, createMarketingTask, updateTaskStatus } from "@/lib/marketing/storage";
 import { getUsuariosActivosEmpresa } from "@/lib/usuarios/empresa";
@@ -108,7 +113,7 @@ export default function ClienteDetailPage() {
   const [modalBajaOperativa, setModalBajaOperativa] = useState(false);
   const [bajaMotivo, setBajaMotivo] = useState("");
   const [bajaAnularFactura, setBajaAnularFactura] = useState(false);
-  const [bajaPreview, setBajaPreview] = useState<{ factura_pendiente_mes: { id: string; numero_factura: string; monto: number } | null } | null>(null);
+  const [bajaPreview, setBajaPreview] = useState<BajaOperativaPreview | null>(null);
   const [bajaProcesando, setBajaProcesando] = useState(false);
   const [errorBaja, setErrorBaja] = useState<string | null>(null);
 
@@ -376,8 +381,7 @@ export default function ClienteDetailPage() {
     setBajaMotivo("");
     setBajaAnularFactura(false);
     setErrorBaja(null);
-    const preview = await apiGetBajaOperativaPreview(id);
-    setBajaPreview(preview ? { factura_pendiente_mes: preview.factura_pendiente_mes } : null);
+    setBajaPreview(await apiGetBajaOperativaPreview(id));
   }
 
   async function handleBajaOperativa() {
@@ -585,16 +589,20 @@ export default function ClienteDetailPage() {
           {bajaPreview?.factura_pendiente_mes && (
             <div className="bg-amber-100/50 border border-amber-200 rounded-lg p-3">
               <p className="text-sm text-amber-900 font-medium mb-2">
-                Este cliente tiene factura pendiente del período actual ({bajaPreview.factura_pendiente_mes.numero_factura} — Gs. {bajaPreview.factura_pendiente_mes.monto?.toLocaleString("es-PY")}).
+                {bajaPreview.facturas_pendientes_count != null && bajaPreview.facturas_pendientes_count > 1
+                  ? `Este cliente tiene ${bajaPreview.facturas_pendientes_count} facturas con saldo pendiente (ej.: ${bajaPreview.factura_pendiente_mes.numero_factura} — Gs. ${bajaPreview.factura_pendiente_mes.monto?.toLocaleString("es-PY")}).`
+                  : `Este cliente tiene factura pendiente (${bajaPreview.factura_pendiente_mes.numero_factura} — Gs. ${bajaPreview.factura_pendiente_mes.monto?.toLocaleString("es-PY")}).`}
               </p>
-              <p className="text-xs text-amber-800 mb-2">¿Deseas anularla también al dar de baja al cliente?</p>
+              <p className="text-xs text-amber-800 mb-2">
+                ¿Deseas anularlas al dar de baja? (quedarán en estado Anulado y no sumarán en cobranzas)
+              </p>
               <div className="flex gap-3">
                 <button
                   type="button"
                   onClick={() => setBajaAnularFactura(true)}
                   className={`text-xs px-3 py-1.5 rounded-lg font-medium ${bajaAnularFactura ? "bg-amber-600 text-white" : "bg-white border border-amber-300 text-amber-800 hover:bg-amber-100"}`}
                 >
-                  Sí, anular factura pendiente
+                  Sí, anular facturas pendientes
                 </button>
                 <button
                   type="button"

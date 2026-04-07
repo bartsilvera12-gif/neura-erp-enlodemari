@@ -5,31 +5,13 @@ import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
 import { emitEvent, EVENT_TYPES } from "@/lib/integrations/events";
 import { montosFacturaItemParaInsert } from "@/lib/facturacion/factura-item-montos";
+import { obtenerSiguienteNumeroFacturaEmpresa } from "@/lib/facturacion/factura-suscripcion-servidor";
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error("Supabase no configurado");
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
-}
-
-/** Obtiene el siguiente número de factura para la empresa. */
-async function obtenerSiguienteNumero(supabase: ReturnType<typeof getSupabase>, empresaId: string): Promise<string> {
-  const prefijo = process.env.FACTURA_PREFIJO ?? "FAC-";
-  const { data } = await supabase
-    .from("facturas")
-    .select("numero_factura")
-    .eq("empresa_id", empresaId)
-    .order("numero_factura", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  let next = 1;
-  if (data?.numero_factura) {
-    const match = String(data.numero_factura).match(/(\d+)$/);
-    if (match) next = parseInt(match[1], 10) + 1;
-  }
-  return `${prefijo}${String(next).padStart(6, "0")}`;
 }
 
 /**
@@ -115,7 +97,7 @@ export async function POST(
       );
     }
 
-    const numeroFactura = await obtenerSiguienteNumero(supabase, auth.empresa_id);
+    const numeroFactura = await obtenerSiguienteNumeroFacturaEmpresa(supabase, auth.empresa_id);
     const monto = Number(suscripcion.precio);
     const moneda = suscripcion.moneda === "USD" ? "USD" : "GS";
 

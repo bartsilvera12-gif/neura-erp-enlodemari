@@ -113,6 +113,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(errorResponse("Factura no encontrada"), { status: 404 });
     }
 
+    const estadoFac = String(factura.estado ?? "");
+    if (estadoFac === "Anulado") {
+      return NextResponse.json(errorResponse("No se puede registrar pago sobre una factura anulada"), { status: 400 });
+    }
+    if (estadoFac === "Pagado" && Number(factura.saldo) <= 0) {
+      return NextResponse.json(errorResponse("La factura ya está pagada"), { status: 400 });
+    }
+
     const saldoActual = Number(factura.saldo);
     const montoNum = Number(monto);
     if (montoNum > saldoActual) {
@@ -122,7 +130,9 @@ export async function POST(request: NextRequest) {
       );
     }
     const nuevoSaldo = Math.max(0, saldoActual - montoNum);
-    const nuevoEstado = nuevoSaldo <= 0 ? "Pagado" : "Parcial";
+    /** CHECK en BD solo admite Pagado | Pendiente | Vencido | Anulado — nunca "Parcial". */
+    const nuevoEstado =
+      nuevoSaldo <= 0 ? "Pagado" : estadoFac === "Vencido" ? "Vencido" : "Pendiente";
 
     const metodosValidos = ["efectivo", "transferencia", "cheque", "tarjeta", "otro"];
     const metodo = metodosValidos.includes(metodo_pago) ? metodo_pago : "efectivo";
@@ -148,10 +158,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(errorResponse(error.message), { status: 400 });
     }
 
-    await supabase
+    const { error: errUpdFactura } = await supabase
       .from("facturas")
-      .update({ saldo: nuevoSaldo, estado: nuevoEstado })
-      .eq("id", factura_id);
+      .update({ saldo: nuevoSaldo, estado: nuevoEstado, updated_at: new Date().toISOString() })
+      .eq("id", factura_id.trim())
+      .eq("empresa_id", auth.empresa_id);
+
+    if (errUpdFactura) {
+      await supabase.from("pagos").delete().eq("id", data.id);
+      return NextResponse.json(
+        errorResponse(
+          `El pago no pudo aplicarse al saldo (${errUpdFactura.message}). Verifique el estado de la factura.`
+        ),
+        { status: 500 }
+      );
+    }
 
     console.log("[API] About to emit event");
     await emitEvent(EVENT_TYPES.pago_registrado, { pago_id: data.id, factura_id, monto: montoNum });

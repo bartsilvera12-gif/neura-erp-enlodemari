@@ -166,14 +166,15 @@ export function WhatsAppChannelForm({
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="w-full space-y-6">
       <FormFeedback error={error} success={success} id="canal-form-feedback-top" />
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-5">
         <div className="space-y-3">
           <ConfigCollapsibleSection
             title="Credenciales y conexión"
             description="Identificadores Meta, token para enviar mensajes y estado del canal en el ERP."
+            defaultExpanded
           >
             <div className="space-y-4">
               <div>

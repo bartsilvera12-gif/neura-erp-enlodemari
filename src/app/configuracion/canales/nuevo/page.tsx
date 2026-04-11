@@ -48,7 +48,7 @@ export default function NuevoCanalWhatsappPage() {
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="w-full max-w-none space-y-6 px-4 sm:px-6 lg:px-8 xl:px-10 pb-10">
       <nav className="flex items-center gap-2 text-sm text-slate-500">
         <Link href="/configuracion" className="hover:text-slate-800">
           Configuración
@@ -69,7 +69,7 @@ export default function NuevoCanalWhatsappPage() {
         </p>
       </div>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="w-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6 lg:p-8">
         <WhatsAppChannelForm
           mode="create"
           cancelHref="/configuracion/canales"

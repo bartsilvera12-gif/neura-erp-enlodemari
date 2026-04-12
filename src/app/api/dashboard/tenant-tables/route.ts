@@ -1,7 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
+import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
+
+type TableKey =
+  | "clientes"
+  | "facturas"
+  | "pagos"
+  | "tipificaciones"
+  | "productos"
+  | "ventas"
+  | "ventas_items"
+  | "compras"
+  | "gastos"
+  | "suscripciones"
+  | "clientes_baja_mes"
+  | "suscripciones_canceladas";
+
+/**
+ * Antes: si **cualquier** consulta fallaba (p. ej. `clientes.deleted_at` inexistente en un tenant clonado),
+ * se respondía 400 y el dashboard quedaba **entero** vacío (incluido financiero con facturas/pagos válidos).
+ * Ahora: se devuelven arrays por tabla; errores PostgREST van en `query_errors` sin tumbar el resto.
+ */
+function pickRows<T>(
+  key: TableKey,
+  result: { data: T[] | null; error: { message: string } | null },
+  errors: Partial<Record<TableKey, string>>
+): T[] {
+  if (result.error) {
+    errors[key] = result.error.message;
+    return [];
+  }
+  return result.data ?? [];
+}
 
 /**
  * GET /api/dashboard/tenant-tables
@@ -23,6 +55,9 @@ export async function GET(request: NextRequest) {
     const inicioMes = `${anio}-${String(mes).padStart(2, "0")}-01`;
     const finMes = `${anio}-${String(mes).padStart(2, "0")}-31`;
 
+    const includeDebug = request.nextUrl.searchParams.get("debug") === "1";
+    const dataSchema = includeDebug ? await fetchDataSchemaForEmpresaId(empresaId) : null;
+
     const [
       clientesQ,
       facturasQ,
@@ -37,7 +72,8 @@ export async function GET(request: NextRequest) {
       bajasQ,
       suscBajasQ,
     ] = await Promise.all([
-      supabase.from("clientes").select("*").eq("empresa_id", empresaId).is("deleted_at", null),
+      /** Sin `.is("deleted_at", null)` en PostgREST: en tenants viejos la columna puede no existir y rompía todo el batch. */
+      supabase.from("clientes").select("*").eq("empresa_id", empresaId),
       supabase.from("facturas").select("*").eq("empresa_id", empresaId),
       supabase.from("pagos").select("id, factura_id, monto, fecha_pago").eq("empresa_id", empresaId),
       supabase.from("tipificaciones").select("*").eq("empresa_id", empresaId),
@@ -64,40 +100,26 @@ export async function GET(request: NextRequest) {
         .eq("estado", "cancelada"),
     ]);
 
-    const firstErr =
-      clientesQ.error ||
-      facturasQ.error ||
-      pagosQ.error ||
-      tipificacionesQ.error ||
-      productosQ.error ||
-      ventasQ.error ||
-      ventasItemsQ.error ||
-      comprasQ.error ||
-      gastosQ.error ||
-      suscripcionesDashQ.error ||
-      bajasQ.error ||
-      suscBajasQ.error;
+    const queryErrors: Partial<Record<TableKey, string>> = {};
 
-    if (firstErr) {
-      return NextResponse.json(errorResponse(firstErr.message), { status: 400 });
-    }
+    const payload = {
+      clientes: pickRows("clientes", clientesQ, queryErrors),
+      facturas: pickRows("facturas", facturasQ, queryErrors),
+      pagos: pickRows("pagos", pagosQ, queryErrors),
+      tipificaciones: pickRows("tipificaciones", tipificacionesQ, queryErrors),
+      productos: pickRows("productos", productosQ, queryErrors),
+      ventas: pickRows("ventas", ventasQ, queryErrors),
+      ventas_items: pickRows("ventas_items", ventasItemsQ, queryErrors),
+      compras: pickRows("compras", comprasQ, queryErrors),
+      gastos: pickRows("gastos", gastosQ, queryErrors),
+      suscripciones: pickRows("suscripciones", suscripcionesDashQ, queryErrors),
+      clientes_baja_mes: pickRows("clientes_baja_mes", bajasQ, queryErrors),
+      suscripciones_canceladas: pickRows("suscripciones_canceladas", suscBajasQ, queryErrors),
+      ...(Object.keys(queryErrors).length > 0 ? { query_errors: queryErrors } : {}),
+      ...(includeDebug && dataSchema ? { _debug_data_schema: dataSchema, _debug_empresa_id: empresaId } : {}),
+    };
 
-    return NextResponse.json(
-      successResponse({
-        clientes: clientesQ.data ?? [],
-        facturas: facturasQ.data ?? [],
-        pagos: pagosQ.data ?? [],
-        tipificaciones: tipificacionesQ.data ?? [],
-        productos: productosQ.data ?? [],
-        ventas: ventasQ.data ?? [],
-        ventas_items: ventasItemsQ.data ?? [],
-        compras: comprasQ.data ?? [],
-        gastos: gastosQ.data ?? [],
-        suscripciones: suscripcionesDashQ.data ?? [],
-        clientes_baja_mes: bajasQ.data ?? [],
-        suscripciones_canceladas: suscBajasQ.data ?? [],
-      })
-    );
+    return NextResponse.json(successResponse(payload));
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Error";
     return NextResponse.json(errorResponse(msg), { status: 500 });

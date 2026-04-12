@@ -266,7 +266,25 @@ export async function getDashboardData(): Promise<DashboardData> {
       };
     };
     if (!json.success || !json.data) throw new Error("Respuesta inválida");
-    const d = json.data;
+    const d = json.data as {
+      query_errors?: Partial<Record<string, string>>;
+      clientes?: Record<string, unknown>[];
+      facturas?: Record<string, unknown>[];
+      pagos?: Record<string, unknown>[];
+      tipificaciones?: Record<string, unknown>[];
+      productos?: Record<string, unknown>[];
+      ventas?: Record<string, unknown>[];
+      ventas_items?: Record<string, unknown>[];
+      compras?: Record<string, unknown>[];
+      gastos?: Record<string, unknown>[];
+      suscripciones?: Record<string, unknown>[];
+      clientes_baja_mes?: { id: string }[];
+      suscripciones_canceladas?: { cliente_id: string; precio: number }[];
+    };
+
+    if (d.query_errors && Object.keys(d.query_errors).length > 0) {
+      console.warn("[getDashboardData] Algunas tablas fallaron en PostgREST (el resto se cargó):", d.query_errors);
+    }
 
     const clientesBajaIds = new Set((d.clientes_baja_mes ?? []).map((c) => c.id));
     const suscBajas = d.suscripciones_canceladas ?? [];
@@ -275,17 +293,19 @@ export async function getDashboardData(): Promise<DashboardData> {
       .filter((s) => clientesBajaIds.has(s.cliente_id))
       .reduce((sum, s) => sum + Number(s.precio ?? 0), 0);
 
-    clientes = (d.clientes ?? []).map((r: Record<string, unknown>) => ({
-      id: r.id as string,
-      codigo_cliente: `CL-${(r.id as string).slice(0, 8).toUpperCase()}`,
-      empresa: r.empresa as string | undefined,
-      nombre_contacto: (r.nombre_contacto as string) ?? (r.nombre as string) ?? "",
-      origen: (r.origen as string) ?? "MANUAL",
-      created_at: toIsoTimestampStr(r.created_at as string),
-      vendedor_asignado: r.vendedor_asignado as string | undefined,
-      tipo_servicio_cliente: (r.tipo_servicio_cliente as string) ?? undefined,
-      condicion_pago: (r.condicion_pago as string) ?? undefined,
-    }));
+    clientes = (d.clientes ?? [])
+      .filter((r) => !(r as Record<string, unknown>).deleted_at)
+      .map((r: Record<string, unknown>) => ({
+        id: r.id as string,
+        codigo_cliente: `CL-${(r.id as string).slice(0, 8).toUpperCase()}`,
+        empresa: r.empresa as string | undefined,
+        nombre_contacto: (r.nombre_contacto as string) ?? (r.nombre as string) ?? "",
+        origen: (r.origen as string) ?? "MANUAL",
+        created_at: toIsoTimestampStr(r.created_at as string),
+        vendedor_asignado: r.vendedor_asignado as string | undefined,
+        tipo_servicio_cliente: (r.tipo_servicio_cliente as string) ?? undefined,
+        condicion_pago: (r.condicion_pago as string) ?? undefined,
+      }));
 
     facturas = (d.facturas ?? []).map((r: Record<string, unknown>) => ({
       id: r.id as string,

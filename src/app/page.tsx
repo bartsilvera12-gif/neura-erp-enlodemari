@@ -950,17 +950,6 @@ function DashFinanciero({
     return s;
   }, [facturasPeriodo, montoPagadoPorFacturaId]);
 
-  const facturasContadoImplicitasCount = useMemo(
-    () =>
-      facturasPeriodo.filter(
-        (f) =>
-          (f.tipo ?? "").toLowerCase() === "contado" &&
-          !esFacturaAnulada(f.estado) &&
-          (montoPagadoPorFacturaId.get(String(f.id)) ?? 0) === 0
-      ).length,
-    [facturasPeriodo, montoPagadoPorFacturaId]
-  );
-
   /** Cobranza reconocida en el período (pagos + contado implícito): base para pendiente y %. */
   const cobranzaTotalPeriodo = cobradoRegistradoPeriodo + cobroImplicitoContadoPeriodo;
   const pendientePeriodo = aCobrarPeriodo - cobranzaTotalPeriodo;
@@ -1010,7 +999,7 @@ function DashFinanciero({
       const key = raw || "__sin__";
       map.set(key, (map.get(key) ?? 0) + 1);
     }
-    const PALETTE = [Z.accent, "#3B82F6", "#60A5FA", Z.success, "#A78BFA", "#F59E0B", "#EC4899", "#38BDF8"];
+    const PALETTE = ["#2563EB", "#3B82F6", "#60A5FA", "#22C55E", "#A78BFA", "#F59E0B", "#EC4899", "#38BDF8"];
     const entries = [...map.entries()].sort((a, b) => b[1] - a[1]);
     return {
       dimCliente: dim,
@@ -1022,138 +1011,81 @@ function DashFinanciero({
     };
   }, [clientes]);
 
-  const cardBase =
-    "rounded-2xl border border-white/10 p-8 shadow-lg shadow-black/20 transition-colors";
-  const cardStyle = { backgroundColor: Z.card } as const;
+  const finCard =
+    "rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm shadow-slate-200/50 transition-shadow hover:shadow-md sm:p-7";
+  const finAccent = "#2563EB";
 
   return (
-    <div className="space-y-8">
-
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-5">
-        <motion.div whileHover={{ y: -3 }} className={cardBase} style={cardStyle}>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: Z.muted }}>
-            A cobrar del período
-          </p>
-          <p className="mt-4 text-3xl font-bold tabular-nums tracking-tight" style={{ color: Z.text }}>
-            Gs. {formatGsM(aCobrarPeriodo)}
-          </p>
-          <div className="mt-4 h-px w-12 rounded-full opacity-60" style={{ backgroundColor: Z.accent }} />
-          <p className="mt-4 text-xs leading-relaxed" style={{ color: Z.muted }}>
-            Suma del monto de facturas <strong style={{ color: Z.text }}>emitidas</strong> en el período (fecha de
-            emisión), excluye anuladas · {facturasPeriodo.length} factura{facturasPeriodo.length === 1 ? "" : "s"}
+    <div className="space-y-6 rounded-2xl border border-slate-200/80 bg-gradient-to-b from-slate-50 to-white p-4 sm:space-y-8 sm:p-6 md:p-8">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5 xl:gap-5">
+        <motion.div whileHover={{ y: -2 }} className={finCard}>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">A cobrar del período</p>
+          <p className="mt-3 break-words text-xl font-bold tabular-nums tracking-tight text-slate-900 sm:text-2xl">
+            Gs. {formatGs(aCobrarPeriodo)}
           </p>
         </motion.div>
-        <motion.div whileHover={{ y: -3 }} className={cardBase} style={cardStyle}>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: Z.muted }}>
-            Cobrado del período
-          </p>
-          <p className="mt-4 text-3xl font-bold tabular-nums tracking-tight" style={{ color: Z.accent }}>
-            Gs. {formatGsM(cobradoRegistradoPeriodo)}
-          </p>
-          <div className="mt-4 h-px w-12 rounded-full opacity-60" style={{ backgroundColor: Z.accent }} />
-          <p className="mt-4 text-xs leading-relaxed" style={{ color: Z.muted }}>
-            Solo <strong style={{ color: Z.text }}>pagos registrados</strong> (fecha de pago en el período; factura no
-            anulada). Coincide con el criterio del módulo Pagos · {pagosPeriodo.length} pago{pagosPeriodo.length === 1 ? "" : "s"}
-          </p>
-        </motion.div>
-        <motion.div whileHover={{ y: -3 }} className={cardBase} style={cardStyle}>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: Z.muted }}>
-            Ventas al contado (implícito)
-          </p>
-          <p className="mt-4 text-3xl font-bold tabular-nums tracking-tight" style={{ color: Z.text }}>
-            Gs. {formatGsM(cobroImplicitoContadoPeriodo)}
-          </p>
-          <div className="mt-4 h-px w-12 rounded-full opacity-60" style={{ backgroundColor: Z.accent }} />
-          <p className="mt-4 text-xs leading-relaxed" style={{ color: Z.muted }}>
-            Facturas <strong style={{ color: Z.text }}>tipo contado</strong> emitidas en el período sin filas en la
-            tabla <code className="text-[10px] opacity-90">pagos</code> (cobro al emitir) · {facturasContadoImplicitasCount}{" "}
-            factura{facturasContadoImplicitasCount === 1 ? "" : "s"}
-          </p>
-        </motion.div>
-        <motion.div whileHover={{ y: -3 }} className={cardBase} style={cardStyle}>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: Z.muted }}>
-            Pendiente del período
-          </p>
+        <motion.div whileHover={{ y: -2 }} className={finCard}>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Cobrado del período</p>
           <p
-            className="mt-4 text-3xl font-bold tabular-nums tracking-tight"
-            style={{
-              color:
-                pendientePeriodo > 0 ? "#FBBF24" : pendientePeriodo < 0 ? Z.success : Z.text,
-            }}
+            className="mt-3 break-words text-xl font-bold tabular-nums tracking-tight sm:text-2xl"
+            style={{ color: finAccent }}
           >
-            {pendientePeriodo < 0 ? "− " : ""}Gs. {formatGsM(Math.abs(pendientePeriodo))}
-          </p>
-          <div className="mt-4 h-px w-12 rounded-full opacity-60" style={{ backgroundColor: Z.accent }} />
-          <p className="mt-4 text-xs leading-relaxed" style={{ color: Z.muted }}>
-            A cobrar − (cobrado registrado + contado implícito)
+            Gs. {formatGs(cobradoRegistradoPeriodo)}
           </p>
         </motion.div>
-        <motion.div whileHover={{ y: -3 }} className={cardBase} style={cardStyle}>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: Z.muted }}>
-            % de cobranza
+        <motion.div whileHover={{ y: -2 }} className={finCard}>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Ventas al contado (implícito)</p>
+          <p className="mt-3 break-words text-xl font-bold tabular-nums tracking-tight text-slate-900 sm:text-2xl">
+            Gs. {formatGs(cobroImplicitoContadoPeriodo)}
           </p>
-          <p className="mt-4 text-3xl font-bold tabular-nums tracking-tight" style={{ color: Z.text }}>
+        </motion.div>
+        <motion.div whileHover={{ y: -2 }} className={finCard}>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Pendiente del período</p>
+          <p
+            className={`mt-3 break-words text-xl font-bold tabular-nums tracking-tight sm:text-2xl ${
+              pendientePeriodo > 0
+                ? "text-amber-600"
+                : pendientePeriodo < 0
+                  ? "text-emerald-600"
+                  : "text-slate-900"
+            }`}
+          >
+            {pendientePeriodo < 0 ? "− " : ""}Gs. {formatGs(Math.abs(pendientePeriodo))}
+          </p>
+        </motion.div>
+        <motion.div whileHover={{ y: -2 }} className={finCard}>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">% de cobranza</p>
+          <p className="mt-3 text-2xl font-bold tabular-nums tracking-tight text-slate-900 sm:text-3xl">
             {pctCobranza == null ? "—" : `${pctCobranza.toFixed(1)}%`}
           </p>
-          <div className="mt-4 h-px w-12 rounded-full opacity-60" style={{ backgroundColor: Z.accent }} />
-          <p className="mt-4 text-xs leading-relaxed" style={{ color: Z.muted }}>
-            (Cobrado registrado + contado implícito) ÷ A cobrar ·{" "}
-            {aCobrarPeriodo <= 0 ? "sin emisión en el período" : "mismo filtro de fechas"}
-          </p>
         </motion.div>
       </div>
 
-      <div className="rounded-2xl border border-white/10 p-6 sm:p-8" style={{ backgroundColor: Z.card }}>
-        <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: Z.muted }}>
-          Definición de indicadores · {periodo}
-        </h3>
-        <ul className="mt-3 max-w-4xl list-disc space-y-1.5 pl-4 text-xs leading-relaxed" style={{ color: Z.muted }}>
-          <li>
-            <strong style={{ color: Z.text }}>A cobrar del período:</strong> suma de montos de facturas no anuladas con{" "}
-            <em>fecha de emisión</em> en el rango.
-          </li>
-          <li>
-            <strong style={{ color: Z.text }}>Cobrado del período:</strong> suma de la tabla <code className="text-[10px]">pagos</code>{" "}
-            cuya <em>fecha de pago</em> cae en el rango; se excluyen pagos ligados a facturas anuladas. Alineado con el
-            módulo Pagos → Cobrados.
-          </li>
-          <li>
-            <strong style={{ color: Z.text }}>Ventas al contado (implícito):</strong> facturas tipo contado emitidas en
-            el período sin movimientos en <code className="text-[10px]">pagos</code> (cobro reconocido al emitir).
-          </li>
-          <li>
-            <strong style={{ color: Z.text }}>Pendiente del período:</strong> A cobrar − cobrado registrado − contado
-            implícito.
-          </li>
-          <li>
-            <strong style={{ color: Z.text }}>% de cobranza:</strong> (cobrado registrado + contado implícito) ÷ A
-            cobrar.
-          </li>
-        </ul>
-      </div>
-
-      <div className="rounded-2xl border border-white/10 p-6 sm:p-8" style={{ backgroundColor: Z.card }}>
-        <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: Z.muted }}>
-          Cobrado por día
-        </h3>
-        <p className="mt-2 max-w-3xl text-xs leading-relaxed" style={{ color: Z.muted }}>
-          Pagos registrados por <strong style={{ color: Z.text }}>fecha de pago</strong> (mismo criterio que “Cobrado
-          del período”). Días sin pagos se muestran en cero para mantener la continuidad de la serie.
-        </p>
+      <div className={finCard}>
+        <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Cobrado por día</h3>
+            <p className="mt-1 text-[11px] text-slate-400">Pagos registrados por fecha de pago</p>
+          </div>
+          <div className="text-left sm:text-right">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Total cobrado</p>
+            <p className="mt-0.5 text-lg font-bold tabular-nums sm:text-xl" style={{ color: finAccent }}>
+              Gs. {formatGs(cobradoRegistradoPeriodo)}
+            </p>
+          </div>
+        </div>
         {cobradoPorDiaSerie.length === 0 ? (
-          <p className="mt-6 text-sm" style={{ color: Z.muted }}>
-            Sin rango de fechas válido.
-          </p>
+          <p className="mt-6 text-sm text-slate-500">Sin rango de fechas válido.</p>
         ) : (
-          <div className="mt-6 h-[300px] w-full min-w-0">
+          <div className="mt-5 h-[300px] w-full min-w-0">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={cobradoPorDiaSerie} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+              <LineChart data={cobradoPorDiaSerie} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
+                <CartesianGrid stroke="#e2e8f0" vertical={false} />
                 <XAxis
                   dataKey="fecha"
-                  tick={{ fill: Z.muted, fontSize: 10 }}
+                  tick={{ fill: "#64748b", fontSize: 10 }}
                   tickLine={false}
-                  axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+                  axisLine={{ stroke: "#cbd5e1" }}
                   tickFormatter={(ymd: string) => {
                     if (!ymd || ymd.length < 10) return ymd;
                     return `${ymd.slice(8, 10)}/${ymd.slice(5, 7)}`;
@@ -1161,14 +1093,14 @@ function DashFinanciero({
                   minTickGap={28}
                 />
                 <YAxis
-                  tick={{ fill: Z.muted, fontSize: 10 }}
+                  tick={{ fill: "#64748b", fontSize: 10 }}
                   tickLine={false}
-                  axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+                  axisLine={{ stroke: "#cbd5e1" }}
                   tickFormatter={(v: number) => formatGsM(Number(v))}
-                  width={48}
+                  width={52}
                 />
                 <Tooltip
-                  cursor={{ stroke: "rgba(37,99,235,0.35)", strokeWidth: 1 }}
+                  cursor={{ stroke: "rgba(37,99,235,0.25)", strokeWidth: 1 }}
                   content={({ active, payload }) => {
                     if (!active || !payload?.length) return null;
                     const row = payload[0].payload as {
@@ -1177,15 +1109,12 @@ function DashFinanciero({
                       count: number;
                     };
                     return (
-                      <div
-                        className="rounded-lg border border-white/15 px-3 py-2 text-xs shadow-xl"
-                        style={{ backgroundColor: Z.surface, color: Z.text }}
-                      >
-                        <p className="font-medium" style={{ color: Z.muted }}>
-                          {formatFecha(row.fecha)}
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 shadow-lg">
+                        <p className="font-medium text-slate-500">{formatFecha(row.fecha)}</p>
+                        <p className="mt-1.5 text-sm font-semibold tabular-nums text-slate-900">
+                          Gs. {formatGs(row.monto)}
                         </p>
-                        <p className="mt-1.5 text-sm font-semibold tabular-nums">Gs. {formatGs(row.monto)}</p>
-                        <p className="mt-1 text-[11px]" style={{ color: Z.muted }}>
+                        <p className="mt-1 text-[11px] text-slate-500">
                           {row.count} pago{row.count === 1 ? "" : "s"}
                         </p>
                       </div>
@@ -1195,10 +1124,10 @@ function DashFinanciero({
                 <Line
                   type="monotone"
                   dataKey="monto"
-                  stroke={Z.accent}
+                  stroke={finAccent}
                   strokeWidth={2.5}
                   dot={false}
-                  activeDot={{ r: 5, fill: Z.accent, stroke: "#fff", strokeWidth: 1 }}
+                  activeDot={{ r: 5, fill: finAccent, stroke: "#fff", strokeWidth: 2 }}
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -1207,17 +1136,11 @@ function DashFinanciero({
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5 lg:gap-8">
-        <motion.div
-          whileHover={{ y: -2 }}
-          className="rounded-2xl border border-white/10 p-6 sm:p-8 lg:col-span-3"
-          style={{ backgroundColor: Z.card }}
-        >
-          <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: Z.muted }}>
-            Progreso de metas
-          </h3>
+        <motion.div whileHover={{ y: -2 }} className={`${finCard} lg:col-span-3`}>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Progreso de metas</h3>
           <div className="mt-6 grid grid-cols-1 gap-8 sm:grid-cols-2">
             <ProgressBar
-              variant="zentra"
+              variant="light"
               label="Facturación mensual"
               value={facturasValidas
                 .filter((f) => enMesCalendarioActual(toCalendarDateStr(f.fecha)))
@@ -1229,7 +1152,7 @@ function DashFinanciero({
               format="gs"
             />
             <ProgressBar
-              variant="zentra"
+              variant="light"
               label="Ventas mensuales"
               value={ventas
                 .filter((v) => enMesCalendarioActual(toCalendarDateStr(v.fecha)))
@@ -1242,15 +1165,9 @@ function DashFinanciero({
             />
           </div>
         </motion.div>
-        <motion.div
-          whileHover={{ y: -2 }}
-          className="rounded-2xl border border-white/10 p-6 sm:p-8 lg:col-span-2"
-          style={{ backgroundColor: Z.card }}
-        >
-          <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: Z.muted }}>
-            Distribución de clientes
-          </h3>
-          <p className="mt-1 text-[11px] leading-relaxed" style={{ color: Z.muted }}>
+        <motion.div whileHover={{ y: -2 }} className={`${finCard} lg:col-span-2`}>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Distribución de clientes</h3>
+          <p className="mt-1 text-[11px] text-slate-400">
             Por{" "}
             {dimCliente === "tipo_servicio"
               ? "tipo de servicio"
@@ -1261,7 +1178,7 @@ function DashFinanciero({
           </p>
           <div className="mt-6">
             <DonutChart
-              variant="zentra"
+              variant="light"
               legendDetail
               segments={segmentosClientes}
               centerLabel="clientes"

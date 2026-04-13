@@ -120,6 +120,25 @@ Crea una nota de crédito en estado **borrador** (monto = saldo pendiente; sin e
 
 ---
 
+### Notas de crédito — SIFEN (por `nota_credito_id`)
+
+Rutas bajo **`/api/notas-credito/[id]/sifen/...`** donde `[id]` es el UUID de `nota_credito`. Reutilizan certificado, CSC y ambiente de `empresa_sifen_config`. El **impacto en `facturas.saldo`** ocurre solo cuando la consulta de lote determina **aprobación SET** (RPC `nota_credito_tras_aprobacion_set_transaccional`).
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| POST | `/api/notas-credito/[id]/sifen/xml` | Genera XML rDE v150 (NC), sube a Storage, estado `generado`. |
+| POST | `/api/notas-credito/[id]/sifen/firmar` | Firma el XML (XML-DSig), estado `firmado`. |
+| POST | `/api/notas-credito/[id]/sifen/enviar-test` | `recibe-lote` solo si ambiente configuración es **test**. |
+| POST | `/api/notas-credito/[id]/sifen/enviar` | `recibe-lote` producción (rechaza si ambiente ≠ producción). |
+| POST | `/api/notas-credito/[id]/sifen/consulta-lote-test` | Consulta lote TEST (`dProtConsLote`); puede marcar `en_proceso`, `aprobado` o `rechazado`. |
+| POST | `/api/notas-credito/[id]/sifen/consulta-lote` | Igual en producción. |
+| POST | `/api/notas-credito/[id]/sifen/procesar-test` | Secuencia: xml → firmar → enviar-test. |
+| POST | `/api/notas-credito/[id]/sifen/procesar` | Secuencia: xml → firmar → enviar (prod). |
+
+**Query opcional:** `?debug=1` en xml/firmar incluye el XML en la respuesta; `?debug=1` en enviar incluye SOAP; `?debug=1` en consulta-lote incluye cuerpo SOAP.
+
+---
+
 ### Pagos
 
 #### GET /api/pagos

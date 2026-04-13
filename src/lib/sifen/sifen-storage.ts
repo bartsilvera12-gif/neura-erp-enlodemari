@@ -16,6 +16,15 @@ export function buildSifenSignedXmlObjectPath(empresaId: string, facturaId: stri
   return `${empresaId}/${facturaId}/documento-firmado.xml`;
 }
 
+/** XML rDE nota de crédito (sin firma). */
+export function buildSifenNcXmlObjectPath(empresaId: string, notaCreditoId: string): string {
+  return `${empresaId}/nc/${notaCreditoId}/documento.xml`;
+}
+
+export function buildSifenNcSignedXmlObjectPath(empresaId: string, notaCreditoId: string): string {
+  return `${empresaId}/nc/${notaCreditoId}/documento-firmado.xml`;
+}
+
 export async function ensureSifenStorageBucket(supabase: AppSupabaseClient): Promise<{ ok: true } | { ok: false; message: string }> {
   const { data: buckets, error: listErr } = await supabase.storage.listBuckets();
   if (listErr) {

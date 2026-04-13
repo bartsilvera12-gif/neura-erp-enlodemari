@@ -1,4 +1,4 @@
-# Notas de crédito — Fase 1 (implementado)
+# Notas de crédito — Fase 1 y Fase 2 (SIFEN)
 
 ## Alcance
 
@@ -7,7 +7,17 @@
 - Registro de fila en **nota_credito_electronica** en estado SIFEN `sin_envio` (sin XML/envío en esta fase).
 - **Auditoría** en `nota_credito_evento` (creación, validación, anulación de borrador).
 - UI en detalle de factura: bloque **Corrección fiscal**, historial y modal de alta.
-- **No** se modifica el saldo de la factura al crear el borrador (solo cuando exista flujo de aprobación SIFEN en fases posteriores).
+- **No** se modifica el saldo de la factura al crear el borrador.
+
+## Fase 2 — Ciclo SIFEN completo (NC)
+
+- Generación de XML (rDE v150, nota de crédito electrónica), firma, envío `recibe-lote`, consulta de lote y transición de estados.
+- **`facturas.saldo`** se actualiza **solo** cuando `nota_credito_electronica.estado_sifen` pasa a **`aprobado`** (RPC atómico en `zentra_erp` + schema de datos de la empresa).
+- Si SET **rechaza**, no se toca saldo; `nota_credito.estado_erp` → `rechazada`.
+- Estados SIFEN: `sin_envio`, `generado`, `firmado`, `enviado`, `en_proceso` (p. ej. lote 0361), `aprobado`, `rechazado`, `error_envio`, `cancelado`.
+- Auditoría: `nota_credito_evento` con tipos `xml_generado`, `xml_firmado`, `enviado_set`, `respuesta_set`, `aprobado`, `rechazado`, `impacto_saldo_aplicado`, `error_envio`, etc.
+
+Endpoints: ver `docs/API.md` — sección **Notas de crédito — SIFEN**.
 
 ## Reglas de prioridad
 

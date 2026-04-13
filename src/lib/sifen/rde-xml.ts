@@ -658,3 +658,10 @@ export function buildOfficialRdeFacturaElectronicaXml(
 
   return xml;
 }
+
+/** Re-exportados para generadores de otros tipos de DE (p. ej. nota de crédito). */
+export {
+  dFeEmiDeYFecFirma as sifenDFeEmiDeYFecFirma,
+  dCodSegNueveDigitos as sifenDCodSegNueveDigitos,
+  iTipContCodigo as sifenEmisorITipContCodigo,
+};

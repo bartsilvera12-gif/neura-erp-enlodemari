@@ -5,6 +5,8 @@
  * Orden base (43) + dígito verificador módulo 11 (pesos 2→11 desde la derecha, reinicio en 2).
  */
 const I_TI_DE_FE = "01"; // Factura electrónica (iTiDE=1, 2 dígitos)
+/** Nota de crédito electrónica (iTiDE=5 → CDC tipo doc "05"). */
+export const I_TI_DE_NCE = "5";
 
 export function padDigits(value: string | number, len: number): string {
   const s = String(value).replace(/\D/g, "");

@@ -238,7 +238,7 @@ export function inferirEstadoSifenTrasConsultaLote(
   parsed: ConsultaLoteRespuestaParsed
 ): { nuevoEstado: "aprobado" | "rechazado" | null; filaRelevante: ConsultaLoteDetalleCdc | null } {
   if (parsed.soapFault) return { nuevoEstado: null, filaRelevante: null };
-  if (estadoActual !== "enviado") return { nuevoEstado: null, filaRelevante: null };
+  if (estadoActual !== "enviado" && estadoActual !== "en_proceso") return { nuevoEstado: null, filaRelevante: null };
 
   const rows = parsed.detalle_por_cdc;
   if (rows.length === 0) return { nuevoEstado: null, filaRelevante: null };

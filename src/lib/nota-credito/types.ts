@@ -14,6 +14,7 @@ export type NotaCreditoEstadoSifen =
   | "generado"
   | "firmado"
   | "enviado"
+  | "en_proceso"
   | "aprobado"
   | "rechazado"
   | "error_envio"
@@ -27,7 +28,15 @@ export type NotaCreditoEventoTipo =
   | "preparacion_sifen"
   | "error"
   | "observacion_operativa"
-  | "anulacion_borrador";
+  | "anulacion_borrador"
+  | "xml_generado"
+  | "xml_firmado"
+  | "enviado_set"
+  | "respuesta_set"
+  | "aprobado"
+  | "rechazado"
+  | "impacto_saldo_aplicado"
+  | "error_envio";
 
 export type NotaCreditoListItemDTO = {
   id: string;
@@ -46,6 +55,7 @@ export type NotaCreditoListItemDTO = {
   estado_sifen: NotaCreditoEstadoSifen | null;
   cdc: string | null;
   cdc_factura_origen: string | null;
+  last_error: string | null;
 };
 
 export type NotaCreditoCreateBody = {

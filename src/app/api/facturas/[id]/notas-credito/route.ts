@@ -25,6 +25,7 @@ function mapListRow(r: Record<string, unknown>): NotaCreditoListItemDTO {
     estado_sifen: ne?.estado_sifen == null ? null : (String(ne.estado_sifen) as NotaCreditoListItemDTO["estado_sifen"]),
     cdc: ne?.cdc == null ? null : String(ne.cdc),
     cdc_factura_origen: ne?.cdc_factura_origen == null ? null : String(ne.cdc_factura_origen),
+    last_error: ne?.last_error == null ? null : String(ne.last_error),
   };
 }
 
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const { data: rows, error: errL } = await supabase
       .from("nota_credito")
       .select(
-        "id, monto, motivo, observacion_interna, estado_erp, created_at, created_by_user_id, created_by_email_snapshot, created_by_nombre_snapshot, saldo_previo_snapshot, monto_factura_snapshot, suma_pagos_snapshot, moneda_snapshot, nota_credito_electronica(estado_sifen, cdc, cdc_factura_origen)"
+        "id, monto, motivo, observacion_interna, estado_erp, created_at, created_by_user_id, created_by_email_snapshot, created_by_nombre_snapshot, saldo_previo_snapshot, monto_factura_snapshot, suma_pagos_snapshot, moneda_snapshot, nota_credito_electronica(estado_sifen, cdc, cdc_factura_origen, last_error)"
       )
       .eq("factura_id", fid)
       .eq("empresa_id", auth.empresa_id)

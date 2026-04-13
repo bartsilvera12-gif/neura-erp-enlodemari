@@ -240,6 +240,32 @@ export interface SifenFacturaPayloadBase {
   sifen: SifenPayloadMeta;
 }
 
+/** Meta para armar el DE de nota de crédito (vínculo a `nota_credito_electronica`). */
+export interface SifenNotaCreditoPayloadMeta {
+  nota_credito_electronica_id: string;
+  estado_sifen: string;
+}
+
+/** Payload para XML rDE nota de crédito electrónica (iTiDE=5). */
+export interface SifenNotaCreditoPayload {
+  emisor: SifenPayloadEmisor;
+  receptor: SifenPayloadReceptor;
+  notaCredito: {
+    id: string;
+    monto: number;
+    motivo: string;
+    /** Fecha calendario YYYY-MM-DD alineada al CDC (emisión NC = misma lógica que FE). */
+    fecha_emision: string;
+  };
+  facturaOrigen: {
+    numero_factura: string;
+    fecha: string;
+    moneda: string;
+  };
+  documentoElectronicoOrigen: { cdc: string };
+  sifen: SifenNotaCreditoPayloadMeta;
+}
+
 // ─── Documento interno previo a XML (mapPayloadBaseToSifenDocumento; no es el GET API) ─
 
 /** Cabecera de identificación del DE (campos ERP + vínculo electrónico). */

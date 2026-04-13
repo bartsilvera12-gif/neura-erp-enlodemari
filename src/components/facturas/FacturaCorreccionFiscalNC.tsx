@@ -29,8 +29,42 @@ function labelEstadoErp(e: string) {
 
 function labelEstadoSifen(e: string | null) {
   if (e == null || e === "") return "—";
-  if (e === "sin_envio") return "Sin envío aún";
-  return e;
+  const m: Record<string, string> = {
+    sin_envio: "Sin envío",
+    borrador: "Borrador DE",
+    generado: "XML generado",
+    firmado: "Firmado",
+    enviado: "Enviado a SET",
+    en_proceso: "En proceso (SET)",
+    aprobado: "Aprobado (SET)",
+    rechazado: "Rechazado (SET)",
+    error_envio: "Error de envío",
+    cancelado: "Cancelado",
+  };
+  return m[e] ?? e;
+}
+
+function nextNcSifenStep(
+  nc: NotaCreditoListItemDTO,
+  opts: { deAprobado: boolean; puedeCancelarDe: boolean }
+): { url: string; label: string } | null {
+  if (!opts.deAprobado || opts.puedeCancelarDe) return null;
+  if (nc.estado_erp === "anulada_borrador" || nc.estado_erp === "aprobada" || nc.estado_erp === "rechazada") {
+    return null;
+  }
+  const st = nc.estado_sifen ?? "sin_envio";
+  if (st === "aprobado" || st === "rechazado") return null;
+  const base = `/api/notas-credito/${nc.id}/sifen`;
+  if (st === "firmado") {
+    return { url: `${base}/enviar-test`, label: "Enviar a SET (test)" };
+  }
+  if (st === "enviado" || st === "en_proceso") {
+    return { url: `${base}/consulta-lote-test`, label: "Consultar lote (test)" };
+  }
+  if (["sin_envio", "generado", "error_envio", "borrador"].includes(st)) {
+    return { url: `${base}/procesar-test`, label: "Procesar nota de crédito (test)" };
+  }
+  return null;
 }
 
 function formatGs(n: number, moneda: string) {
@@ -69,6 +103,7 @@ export function FacturaCorreccionFiscalNC({
   const [obs, setObs] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [sifenNcId, setSifenNcId] = useState<string | null>(null);
 
   const monedaLabel = moneda === "USD" ? "USD" : "Gs.";
 
@@ -137,6 +172,28 @@ export function FacturaCorreccionFiscalNC({
       setFlash({ kind: "err", text: e instanceof Error ? e.message : "Error de red" });
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function ejecutarPasoSifen(nc: NotaCreditoListItemDTO) {
+    const step = nextNcSifenStep(nc, { deAprobado, puedeCancelarDe });
+    if (!step) return;
+    setSifenNcId(nc.id);
+    setFlash(null);
+    try {
+      const res = await fetchWithSupabaseSession(step.url, { method: "POST" });
+      const j = (await res.json()) as { success?: boolean; error?: string };
+      if (!res.ok || !j.success) {
+        setFlash({ kind: "err", text: j.error ?? `Error ${res.status}` });
+        return;
+      }
+      setFlash({ kind: "ok", text: `${step.label}: OK.` });
+      await reload();
+      await onAfterNcMutation?.();
+    } catch (e) {
+      setFlash({ kind: "err", text: e instanceof Error ? e.message : "Error de red" });
+    } finally {
+      setSifenNcId(null);
     }
   }
 
@@ -231,9 +288,12 @@ export function FacturaCorreccionFiscalNC({
                   <th className="py-1.5 pr-2">Monto</th>
                   <th className="py-1.5 pr-2">Estado ERP</th>
                   <th className="py-1.5 pr-2">SIFEN</th>
+                  <th className="py-1.5 pr-2">CDC</th>
+                  <th className="py-1.5 pr-2">Error SIFEN</th>
                   <th className="py-1.5 pr-2">Usuario</th>
                   <th className="py-1.5 pr-2">Motivo</th>
                   <th className="py-1.5 pr-2">Id</th>
+                  <th className="py-1.5 pr-2">SIFEN</th>
                   <th className="py-1.5">Acciones</th>
                 </tr>
               </thead>
@@ -248,6 +308,18 @@ export function FacturaCorreccionFiscalNC({
                     </td>
                     <td className="py-2 pr-2">{labelEstadoErp(nc.estado_erp)}</td>
                     <td className="py-2 pr-2">{labelEstadoSifen(nc.estado_sifen)}</td>
+                    <td
+                      className="py-2 pr-2 font-mono text-[10px] max-w-[100px] truncate text-slate-600"
+                      title={nc.cdc ?? ""}
+                    >
+                      {nc.cdc ?? "—"}
+                    </td>
+                    <td
+                      className="py-2 pr-2 max-w-[140px] truncate text-red-800/90"
+                      title={nc.last_error ?? ""}
+                    >
+                      {nc.last_error ?? "—"}
+                    </td>
                     <td className="py-2 pr-2 max-w-[140px] truncate" title={nc.created_by_email_snapshot ?? ""}>
                       {nc.created_by_nombre_snapshot ?? nc.created_by_email_snapshot ?? "—"}
                     </td>
@@ -255,6 +327,24 @@ export function FacturaCorreccionFiscalNC({
                       {nc.motivo}
                     </td>
                     <td className="py-2 pr-2 font-mono text-[10px] text-slate-500">{nc.id.slice(0, 8)}…</td>
+                    <td className="py-2 pr-2">
+                      {(() => {
+                        const step = nextNcSifenStep(nc, { deAprobado, puedeCancelarDe });
+                        if (!step) {
+                          return <span className="text-slate-300">—</span>;
+                        }
+                        return (
+                          <button
+                            type="button"
+                            disabled={sifenNcId === nc.id}
+                            onClick={() => void ejecutarPasoSifen(nc)}
+                            className="text-[#0EA5E9] font-semibold hover:underline disabled:opacity-50 text-left"
+                          >
+                            {sifenNcId === nc.id ? "…" : step.label}
+                          </button>
+                        );
+                      })()}
+                    </td>
                     <td className="py-2">
                       {nc.estado_erp === "borrador" ? (
                         <button
@@ -319,7 +409,8 @@ export function FacturaCorreccionFiscalNC({
                 </dd>
               </div>
               <div className="col-span-2 text-[11px] text-slate-500">
-                El sistema registrará el borrador con el saldo actual como monto de la NC. No se envía aún a SIFEN.
+                El sistema registrará el borrador con el saldo actual como monto de la NC. Luego podés usar «Procesar nota de
+              crédito (test)» en el historial para XML, firma y envío a SET.
               </div>
             </dl>
             <label className="block text-xs font-semibold text-slate-600">

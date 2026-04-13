@@ -152,6 +152,76 @@ function columnasMontosPorItem(totalLineaStr: string, gIva: XmlElement | undefin
   return { exenta: tot, g5: "0", g10: "0" };
 }
 
+/** Datos fiscales mínimos del DE origen (p. ej. para alinear nota de crédito con la FE aprobada). */
+export type OrigenFiscalDesdeRdeXml = {
+  /** Atributo `Id` del nodo `DE` (CDC, 44 dígitos). */
+  cdcId: string;
+  /** `gTimb.iTiDE` (p. ej. "1" factura electrónica). */
+  iTiDE: string;
+  timbrado: {
+    dNumTim: string;
+    dEst: string;
+    dPunExp: string;
+    dFeIniT: string;
+  };
+  actividad: {
+    cActEco: string;
+    dDesActEco: string;
+  };
+  emisor: {
+    dRucEm: string;
+    dDVEmi: string;
+  };
+};
+
+/**
+ * Lee `gTimb`, `gActEco` y RUC emisor del rDE (firmado o no), sin validar firma.
+ * Usado para que la NC reutilice timbrado / establecimiento / punto de la factura origen.
+ */
+export function extractOrigenFiscalDesdeRdeXml(xmlUtf8: string): OrigenFiscalDesdeRdeXml {
+  const doc = new DOMParser().parseFromString(xmlUtf8, "application/xml");
+  const parseErr = doc.getElementsByTagName("parsererror")[0];
+  if (parseErr) throw new Error("XML inválido (parsererror)");
+
+  const rde = parseRdeRoot(doc);
+  const de = firstNs(rde, "DE");
+  if (!de) throw new Error("DE no encontrado");
+
+  const idDe = de.getAttribute("Id")?.trim();
+  if (!idDe) throw new Error("DE sin atributo Id (CDC)");
+  const cdcId = idDe;
+
+  const gDatGralOpe = firstNs(de, "gDatGralOpe");
+  if (!gDatGralOpe) throw new Error("gDatGralOpe no encontrado");
+
+  const gEmis = firstNs(gDatGralOpe, "gEmis");
+  if (!gEmis) throw new Error("gEmis no encontrado");
+  const gActEco = firstNs(gEmis, "gActEco");
+  const cActEco = gActEco ? textOf(firstNs(gActEco, "cActEco")) : "";
+  const dDesActEco = gActEco ? textOf(firstNs(gActEco, "dDesActEco")) : "";
+
+  const gTimb = firstNs(de, "gTimb");
+  if (!gTimb) throw new Error("gTimb no encontrado");
+  const iTiDE = textOf(firstNs(gTimb, "iTiDE"));
+  const timbrado = {
+    dNumTim: textOf(firstNs(gTimb, "dNumTim")),
+    dEst: textOf(firstNs(gTimb, "dEst")),
+    dPunExp: textOf(firstNs(gTimb, "dPunExp")),
+    dFeIniT: textOf(firstNs(gTimb, "dFeIniT")),
+  };
+
+  return {
+    cdcId,
+    iTiDE,
+    timbrado,
+    actividad: { cActEco, dDesActEco },
+    emisor: {
+      dRucEm: textOf(firstNs(gEmis, "dRucEm")),
+      dDVEmi: textOf(firstNs(gEmis, "dDVEmi")),
+    },
+  };
+}
+
 export function parseKudeFromSignedRdeXml(xmlUtf8: string): KudeParsedFromXml {
   const doc = new DOMParser().parseFromString(xmlUtf8, "application/xml");
   const parseErr = doc.getElementsByTagName("parsererror")[0];

@@ -15,15 +15,11 @@ import {
 } from "@/lib/sifen/sifen-storage";
 import { assertNcSifenSinVentanaCancelacionDe } from "./assert-nc-sifen-cancelacion";
 
-/** Igual criterio que FE: `error_envio` permite regenerar y reintentar envío. */
-const ESTADOS_BLOQUEADOS_XML = new Set<string>([
-  "firmado",
-  "enviado",
-  "en_proceso",
-  "aprobado",
-  "rechazado",
-  "cancelado",
-]);
+/**
+ * Igual criterio que FE: `error_envio` permite regenerar y reintentar envío.
+ * `rechazado` permite regenerar XML (p. ej. timbrado corregido) antes de firmar de nuevo.
+ */
+const ESTADOS_BLOQUEADOS_XML = new Set<string>(["firmado", "enviado", "en_proceso", "aprobado", "cancelado"]);
 
 export async function handleNcSifenXmlPost(opts: {
   auth: UsuarioConEmpresaYRol;

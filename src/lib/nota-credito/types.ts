@@ -56,6 +56,8 @@ export type NotaCreditoListItemDTO = {
   cdc: string | null;
   cdc_factura_origen: string | null;
   last_error: string | null;
+  /** Últimas respuestas SET (recibe-lote / consulta-lote) para diagnóstico en UI. */
+  sifen_respuestas_set: Record<string, unknown> | null;
 };
 
 export type NotaCreditoCreateBody = {

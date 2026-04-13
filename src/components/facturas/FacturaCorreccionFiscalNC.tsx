@@ -46,6 +46,20 @@ function labelEstadoSifen(e: string | null) {
 
 const NC_SIFEN_BASE = (ncId: string) => `/api/notas-credito/${ncId}/sifen`;
 
+function mensajeErrorPlano(html: string | null | undefined): string {
+  if (html == null) return "";
+  return String(html)
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number.parseInt(String(n), 10)))
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /**
  * Siguiente paso SIFEN **real**: POST sin sufijo `-test`. El ambiente SET (producción vs pruebas)
  * lo resuelve el servidor según `empresa_sifen_config.ambiente`.
@@ -59,8 +73,11 @@ function nextNcSifenPasoReal(nc: NotaCreditoListItemDTO, opts: { deAprobado: boo
     return null;
   }
   const st = nc.estado_sifen ?? "sin_envio";
-  if (st === "aprobado" || st === "rechazado") return null;
+  if (st === "aprobado") return null;
   const base = NC_SIFEN_BASE(nc.id);
+  if (st === "rechazado") {
+    return { url: `${base}/procesar`, label: "Corregir y reenviar" };
+  }
   if (st === "firmado") {
     return { url: `${base}/enviar`, label: "Enviar lote a SET" };
   }
@@ -86,8 +103,11 @@ function nextNcSifenPasoTestOverride(nc: NotaCreditoListItemDTO, opts: { deAprob
     return null;
   }
   const st = nc.estado_sifen ?? "sin_envio";
-  if (st === "aprobado" || st === "rechazado") return null;
+  if (st === "aprobado") return null;
   const base = NC_SIFEN_BASE(nc.id);
+  if (st === "rechazado") {
+    return { url: `${base}/procesar-test`, label: "Corregir y reenviar (SET TEST)" };
+  }
   if (st === "firmado") {
     return { url: `${base}/enviar-test`, label: "Enviar lote (SET TEST — override)" };
   }
@@ -282,6 +302,11 @@ export function FacturaCorreccionFiscalNC({
   const mostrarHerramientasTestOverride =
     Boolean(sifenCfg?.allowTestOverride && sifenCfg.empresaAmbiente === "produccion");
 
+  const ncRechazoMasReciente = items.find((x) => x.estado_sifen === "rechazado");
+  const pasoReenviarBanner =
+    ncRechazoMasReciente &&
+    nextNcSifenPasoReal(ncRechazoMasReciente, { deAprobado, puedeCancelarDe });
+
   return (
     <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-5 sm:p-6 space-y-4 w-full min-w-0">
       <div className="space-y-2">
@@ -308,6 +333,19 @@ export function FacturaCorreccionFiscalNC({
           borrador.
         </p>
       </div>
+
+      <section
+        className="rounded-lg border border-slate-200 bg-slate-50/50 px-4 py-3 space-y-1"
+        aria-label="Factura vinculada"
+      >
+        <h4 className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Factura</h4>
+        <p className="text-xs text-slate-700 leading-snug">
+          Corrección fiscal asociada a esta factura.{" "}
+          <Link href={`/facturas/${facturaId}`} className="font-semibold text-[#0EA5E9] hover:underline">
+            Abrir factura
+          </Link>
+        </p>
+      </section>
 
       {mostrarHerramientasTestOverride && (
         <details className="rounded-lg border border-dashed border-slate-300 bg-slate-50/80 px-3 py-2 text-[11px] text-slate-700">
@@ -355,6 +393,29 @@ export function FacturaCorreccionFiscalNC({
         </div>
       )}
 
+      {ncRechazoMasReciente && deAprobado && !puedeCancelarDe && (
+        <div
+          className="rounded-lg border-2 border-red-600 bg-red-50 p-4 space-y-3 shadow-sm"
+          role="alert"
+        >
+          <p className="text-base font-bold text-red-800">Nota de crédito rechazada por SET</p>
+          <p className="text-sm text-red-950 leading-relaxed">
+            {mensajeErrorPlano(ncRechazoMasReciente.last_error) ||
+              "La SET devolvió un rechazo. Revisá el detalle técnico en la NC correspondiente."}
+          </p>
+          {pasoReenviarBanner ? (
+            <button
+              type="button"
+              disabled={sifenNcId === ncRechazoMasReciente.id}
+              onClick={() => void ejecutarPasoSifen(ncRechazoMasReciente, pasoReenviarBanner)}
+              className="inline-flex items-center justify-center px-4 py-2.5 rounded-lg bg-red-700 text-white text-sm font-semibold hover:bg-red-800 disabled:opacity-50 shadow-sm"
+            >
+              {sifenNcId === ncRechazoMasReciente.id ? "Procesando…" : "Corregir y reenviar"}
+            </button>
+          ) : null}
+        </div>
+      )}
+
       {flash && (
         <div
           className={`rounded-lg text-sm px-3 py-2 ${
@@ -363,110 +424,130 @@ export function FacturaCorreccionFiscalNC({
               : "bg-red-50 border border-red-200 text-red-900"
           }`}
         >
-          {flash.text}
+          {flash.kind === "err" ? mensajeErrorPlano(flash.text) || flash.text : flash.text}
         </div>
       )}
 
       {items.length > 0 && (
-        <div className="border-t border-slate-100 pt-4 space-y-3 min-w-0">
-          <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Historial — Notas de crédito</h4>
-          <p className="text-[11px] text-slate-500">
-            Endpoints reales (mismo ambiente que configuración):{" "}
-            <span className="font-mono text-slate-600">POST …/sifen/procesar</span> (xml + firmar + enviar),{" "}
-            <span className="font-mono">POST …/sifen/enviar</span>,{" "}
-            <span className="font-mono">POST …/sifen/consulta-lote</span>{" "}
-            <span className="text-slate-400">(sin sufijo -test)</span>.
-          </p>
-          <div className="overflow-x-auto rounded-lg border border-slate-100 -mx-1 sm:mx-0">
-            <table className="w-full min-w-[720px] text-xs text-left">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50/90 text-slate-600">
-                  <th className="py-2 px-2 font-semibold">Fecha</th>
-                  <th className="py-2 px-2 font-semibold">Monto</th>
-                  <th className="py-2 px-2 font-semibold">ERP</th>
-                  <th className="py-2 px-2 font-semibold">SIFEN</th>
-                  <th className="py-2 px-2 font-semibold">CDC</th>
-                  <th className="py-2 px-2 font-semibold">Error</th>
-                  <th className="py-2 px-2 font-semibold">Usuario</th>
-                  <th className="py-2 px-2 font-semibold">Motivo</th>
-                  <th className="py-2 px-2 font-semibold">Acción SIFEN</th>
-                  <th className="py-2 px-2 font-semibold">Otras</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {items.map((nc) => {
-                  const pasoReal = nextNcSifenPasoReal(nc, { deAprobado, puedeCancelarDe });
-                  const pasoTestOv =
-                    mostrarHerramientasTestOverride &&
-                    nextNcSifenPasoTestOverride(nc, { deAprobado, puedeCancelarDe });
-                  return (
-                    <tr key={nc.id} className="text-slate-800 align-top">
-                      <td className="py-2.5 px-2 whitespace-nowrap text-slate-600">
-                        {new Date(nc.created_at).toLocaleString("es-PY", { dateStyle: "short", timeStyle: "short" })}
-                      </td>
-                      <td className="py-2.5 px-2 tabular-nums font-medium whitespace-nowrap">
-                        {monedaLabel} {formatGs(nc.monto, moneda)}
-                      </td>
-                      <td className="py-2.5 px-2">{labelEstadoErp(nc.estado_erp)}</td>
-                      <td className="py-2.5 px-2">{labelEstadoSifen(nc.estado_sifen)}</td>
-                      <td className="py-2.5 px-2 font-mono text-[10px] max-w-[min(140px,28vw)] break-all text-slate-600">
-                        {nc.cdc ?? "—"}
-                      </td>
-                      <td className="py-2.5 px-2 max-w-[200px] text-red-800/90 text-[11px] break-words">
-                        {nc.last_error ?? "—"}
-                      </td>
-                      <td className="py-2.5 px-2 max-w-[140px] text-[11px] break-words">
-                        {nc.created_by_nombre_snapshot ?? nc.created_by_email_snapshot ?? "—"}
-                      </td>
-                      <td className="py-2.5 px-2 max-w-[200px] text-[11px] break-words" title={nc.motivo}>
-                        {nc.motivo}
-                      </td>
-                      <td className="py-2.5 px-2">
-                        <div className="flex flex-col gap-1.5 min-w-[10rem]">
-                          {pasoReal ? (
-                            <button
-                              type="button"
-                              disabled={sifenNcId === nc.id}
-                              onClick={() => void ejecutarPasoSifen(nc, pasoReal)}
-                              className="text-left px-2 py-1.5 rounded-md bg-sky-600 text-white text-[11px] font-semibold hover:bg-sky-700 disabled:opacity-50"
-                            >
-                              {sifenNcId === nc.id ? "…" : pasoReal.label}
-                            </button>
-                          ) : (
-                            <span className="text-slate-300 text-[11px]">—</span>
-                          )}
-                          {pasoTestOv && (
-                            <button
-                              type="button"
-                              disabled={sifenNcId === nc.id}
-                              onClick={() => void ejecutarPasoSifen(nc, pasoTestOv)}
-                              className="text-left px-2 py-1 rounded border border-dashed border-slate-400 text-slate-600 text-[10px] font-medium hover:bg-slate-50 disabled:opacity-50"
-                            >
-                              {pasoTestOv.label}
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-2">
+        <section className="border-t border-slate-100 pt-4 space-y-4 min-w-0" aria-label="Notas de crédito">
+          <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Notas de crédito</h4>
+          <ul className="space-y-4 list-none p-0 m-0">
+            {items.map((nc) => {
+              const pasoReal = nextNcSifenPasoReal(nc, { deAprobado, puedeCancelarDe });
+              const pasoTestOv =
+                mostrarHerramientasTestOverride &&
+                nextNcSifenPasoTestOverride(nc, { deAprobado, puedeCancelarDe });
+              const errPlano = mensajeErrorPlano(nc.last_error);
+              const jsonSet =
+                nc.sifen_respuestas_set != null ? JSON.stringify(nc.sifen_respuestas_set, null, 2) : null;
+              return (
+                <li
+                  key={nc.id}
+                  className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden min-w-0"
+                >
+                  <div className="px-3 sm:px-4 py-3 border-b border-slate-100 bg-slate-50/80 space-y-2">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 space-y-1">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Nota de crédito</p>
+                        <p className="text-xs text-slate-800">
+                          <span className="text-slate-500">Creada</span>{" "}
+                          {new Date(nc.created_at).toLocaleString("es-PY", {
+                            dateStyle: "short",
+                            timeStyle: "short",
+                          })}{" "}
+                          · {monedaLabel} {formatGs(nc.monto, moneda)}
+                        </p>
+                        <p className="text-[11px] text-slate-600">
+                          <span className="font-semibold text-slate-700">ERP:</span> {labelEstadoErp(nc.estado_erp)} ·{" "}
+                          <span className="font-semibold text-slate-700">SIFEN:</span>{" "}
+                          {labelEstadoSifen(nc.estado_sifen)}
+                        </p>
+                        {nc.motivo ? (
+                          <p className="text-[11px] text-slate-600 line-clamp-2" title={nc.motivo}>
+                            <span className="font-semibold text-slate-700">Motivo:</span> {nc.motivo}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-col gap-1.5 shrink-0 w-full sm:w-auto sm:min-w-[11rem]">
+                        {pasoReal ? (
+                          <button
+                            type="button"
+                            disabled={sifenNcId === nc.id}
+                            onClick={() => void ejecutarPasoSifen(nc, pasoReal)}
+                            className="w-full sm:w-auto text-center px-3 py-2 rounded-lg bg-sky-600 text-white text-xs font-semibold hover:bg-sky-700 disabled:opacity-50"
+                          >
+                            {sifenNcId === nc.id ? "…" : pasoReal.label}
+                          </button>
+                        ) : null}
+                        {pasoTestOv ? (
+                          <button
+                            type="button"
+                            disabled={sifenNcId === nc.id}
+                            onClick={() => void ejecutarPasoSifen(nc, pasoTestOv)}
+                            className="w-full sm:w-auto text-center px-2 py-1.5 rounded-md border border-dashed border-slate-400 text-slate-600 text-[10px] font-medium hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            {pasoTestOv.label}
+                          </button>
+                        ) : null}
                         {nc.estado_erp === "borrador" ? (
                           <button
                             type="button"
                             onClick={() => void anularBorrador(nc)}
-                            className="text-amber-800 font-semibold hover:underline text-[11px]"
+                            className="text-amber-800 font-semibold hover:underline text-[11px] text-left"
                           >
                             Anular borrador
                           </button>
-                        ) : (
-                          <span className="text-slate-300">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+                        ) : null}
+                        {!pasoReal && !pasoTestOv && nc.estado_erp !== "borrador" ? (
+                          <span className="text-slate-400 text-[11px]">Sin acción SIFEN disponible</span>
+                        ) : null}
+                      </div>
+                    </div>
+                    {nc.estado_sifen === "rechazado" && errPlano ? (
+                      <p className="text-sm text-red-900 font-medium leading-snug border-t border-red-100 pt-2 mt-1">
+                        {errPlano}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="px-3 sm:px-4 py-2 space-y-1.5 text-[11px] text-slate-600 border-b border-slate-50">
+                    <p>
+                      <span className="font-semibold text-slate-500">CDC NC:</span>{" "}
+                      <span className="font-mono break-all text-slate-800">{nc.cdc ?? "—"}</span>
+                    </p>
+                    {nc.cdc_factura_origen ? (
+                      <p>
+                        <span className="font-semibold text-slate-500">CDC factura origen:</span>{" "}
+                        <span className="font-mono break-all text-slate-800">{nc.cdc_factura_origen}</span>
+                      </p>
+                    ) : null}
+                    <p>
+                      <span className="font-semibold text-slate-500">Usuario:</span>{" "}
+                      {nc.created_by_nombre_snapshot ?? nc.created_by_email_snapshot ?? "—"}
+                    </p>
+                  </div>
+                  <details className="px-3 sm:px-4 py-2 bg-white text-[11px] group">
+                    <summary className="cursor-pointer font-semibold text-slate-600 select-none list-none flex items-center gap-2 [&::-webkit-details-marker]:hidden">
+                      <span className="text-slate-400 group-open:rotate-90 transition-transform inline-block">▸</span>
+                      SIFEN (detalle técnico y respuestas SET)
+                    </summary>
+                    <p className="mt-2 text-slate-500 leading-snug">
+                      Flujo estándar: <span className="font-mono text-slate-700">POST …/sifen/procesar</span> (generar
+                      XML, firmar, recibe-lote), luego <span className="font-mono">enviar</span> /{" "}
+                      <span className="font-mono">consulta-lote</span> según estado.
+                    </p>
+                    {jsonSet ? (
+                      <pre className="mt-2 max-h-56 overflow-auto rounded-md bg-slate-900 text-slate-100 p-3 text-[10px] leading-relaxed whitespace-pre-wrap break-words border border-slate-700">
+                        {jsonSet}
+                      </pre>
+                    ) : (
+                      <p className="mt-2 text-slate-400 italic">No hay JSON de respuesta SET guardado para esta NC.</p>
+                    )}
+                  </details>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
 
       {modalOpen && (

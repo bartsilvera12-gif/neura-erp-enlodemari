@@ -100,7 +100,14 @@ const MENU_STRUCTURE: MenuItem[] = [
     href: "/dashboard/colas-agentes",
     icon: Headphones,
   },
-  { key: "ventas", slug: "ventas", label: "Ventas", href: "/ventas", icon: ShoppingCart },
+  {
+    key: "ventas",
+    slug: "ventas",
+    label: "Ventas",
+    href: "/ventas",
+    icon: ShoppingCart,
+    children: [{ label: "Notas de crédito", href: "/notas-credito", exactMatch: false }],
+  },
   { key: "inventario", slug: "inventario", label: "Inventario", href: "/inventario", icon: Package, children: [
     { label: "Productos", href: "/inventario" },
     { label: "Movimientos", href: "/inventario/movimientos" },
@@ -256,6 +263,7 @@ export default function Sidebar() {
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({
     inventario: true,
     sorteos: true,
+    ventas: true,
   });
   const [cargando, setCargando] = useState(true);
   const [esSuperAdmin, setEsSuperAdmin] = useState(false);

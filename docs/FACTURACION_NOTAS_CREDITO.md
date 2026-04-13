@@ -19,6 +19,13 @@
 
 Endpoints: ver `docs/API.md` — sección **Notas de crédito — SIFEN**.
 
+## Módulo operativo global
+
+- Pantalla **`/notas-credito`**: listado con filtros (fechas, cliente, estados ERP/SIFEN, usuario, factura, motivo, CDC, con/sin error).
+- Detalle **`/notas-credito/[id]`**: datos generales, DE SIFEN (paths, CDC, respuestas JSON) e **historial de eventos** (`nota_credito_evento`).
+- Menú: **Ventas → Notas de crédito** (requiere módulo `ventas`).
+- Pruebas SET con empresa en producción: variable de servidor **`ALLOW_TEST_MODE=true`**; ver `docs/API.md`.
+
 ## Reglas de prioridad
 
 Si el DE está **aprobado** y aún **puede cancelarse** dentro del plazo configurado (y sin pagos, etc.), el sistema **rechaza** crear una NC (`409`) y la UI prioriza la cancelación.

@@ -9,6 +9,7 @@ import { downloadSifenObject, SIFEN_STORAGE_BUCKET } from "@/lib/sifen/sifen-sto
 import { downloadSifenCertificadoObject } from "@/lib/sifen/sifen-certificados-storage";
 import { toFacturaElectronicaDto } from "@/lib/sifen/to-factura-electronica-dto";
 import type { AmbienteSifen, SifenApiEnviarTestDetalle, SifenEnviarTestResponseData } from "@/lib/sifen/types";
+import { isExplicitSifenTestOverrideEnabled } from "@/lib/env/allow-test-mode";
 
 function parseAmbiente(raw: string): AmbienteSifen | null {
   if (raw === "test" || raw === "produccion") return raw;
@@ -116,14 +117,16 @@ export async function handleSifenEnviarPost(
     });
   }
 
-  if (options.soloAmbienteTest && ambiente !== "test") {
+  if (options.soloAmbienteTest && ambiente !== "test" && !isExplicitSifenTestOverrideEnabled()) {
     return NextResponse.json(
       errorResponse(
-        'Este endpoint solo opera con configuración SIFEN en ambiente "test". Use POST .../sifen/enviar para producción.'
+        'Este endpoint solo opera con configuración SIFEN en ambiente "test", o bien con ALLOW_TEST_MODE=true en el servidor (SOAP a SET TEST). Use POST .../sifen/enviar para producción real.'
       ),
       { status: 400 }
     );
   }
+
+  const ambienteSoap: AmbienteSifen = options.soloAmbienteTest ? "test" : ambiente;
 
   if (!cfg.activo) {
     return NextResponse.json(
@@ -177,7 +180,7 @@ export async function handleSifenEnviarPost(
     resp = await enviarLoteSifen({
       xmlFirmado: xmlDl.data.toString("utf8"),
       empresaConfig: {
-        ambiente,
+        ambiente: ambienteSoap,
         certificadoP12: p12Dl.data,
         certificadoPassword: p12Password,
       },
@@ -186,7 +189,7 @@ export async function handleSifenEnviarPost(
     });
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
-    const label = ambiente === "produccion" ? "SIFEN producción" : "SIFEN TEST";
+    const label = ambienteSoap === "produccion" ? "SIFEN producción" : "SIFEN TEST";
     return NextResponse.json(errorResponse(`Fallo al llamar a ${label} (recibe-lote): ${m}`), {
       status: 502,
     });
@@ -215,7 +218,7 @@ export async function handleSifenEnviarPost(
     (http2xx && protTrim.length > 0 && !resp.loteNoEncolado);
 
   const consultaLoteHint =
-    ambiente === "produccion"
+    ambienteSoap === "produccion"
       ? " — Use «Consultar lote SET» con el protocolo"
       : " — Use «Consultar lote TEST» con el protocolo";
 
@@ -234,7 +237,7 @@ export async function handleSifenEnviarPost(
       const sync = await recibirDeSifenSync({
         xmlFirmadoRde: xmlDl.data.toString("utf8"),
         empresaConfig: {
-          ambiente,
+          ambiente: ambienteSoap,
           certificadoP12: p12Dl.data,
           certificadoPassword: p12Password,
         },

@@ -16,6 +16,8 @@ import { downloadSifenCertificadoObject } from "@/lib/sifen/sifen-certificados-s
 import { extractKeyAndCertFromP12, signSifenDocumentoXml } from "@/lib/sifen/sign-xml";
 import { SIFEN_TEST_CSC_GENERICO } from "@/lib/sifen/sifen-ambiente-test";
 import { parseAmbiente } from "@/lib/sifen/config-validation";
+import type { AmbienteSifen } from "@/lib/sifen/types";
+import { isExplicitSifenTestOverrideEnabled } from "@/lib/env/allow-test-mode";
 import { assertNcSifenSinVentanaCancelacionDe } from "./assert-nc-sifen-cancelacion";
 
 const ESTADOS_BLOQUEADOS_FIRMAR = new Set<string>(["aprobado", "rechazado", "cancelado", "enviado", "en_proceso"]);
@@ -25,8 +27,10 @@ export async function handleNcSifenFirmarPost(opts: {
   supabase: AppSupabaseClient;
   notaCreditoId: string;
   debugXml: boolean;
+  /** Solo `test`; permitido si config ya es test o ALLOW_TEST_MODE en servidor (pipeline *-test). */
+  ambienteFirmaOverride?: AmbienteSifen;
 }): Promise<NextResponse> {
-  const { auth, supabase, notaCreditoId, debugXml } = opts;
+  const { auth, supabase, notaCreditoId, debugXml, ambienteFirmaOverride } = opts;
   const nid = notaCreditoId.trim();
 
   const { data: ncRow, error: errNc } = await supabase
@@ -100,9 +104,21 @@ export async function handleNcSifenFirmarPost(opts: {
     return NextResponse.json(errorResponse("Falta contraseña del certificado cifrada."), { status: 400 });
   }
 
-  const ambiente = parseAmbiente(cfg.ambiente);
-  if (!ambiente) {
+  const ambienteCfg = parseAmbiente(cfg.ambiente);
+  if (!ambienteCfg) {
     return NextResponse.json(errorResponse('Ambiente SIFEN inválido (use "test" o "produccion").'), { status: 400 });
+  }
+
+  let ambiente = ambienteCfg;
+  if (ambienteFirmaOverride === "test") {
+    if (ambienteCfg === "test" || isExplicitSifenTestOverrideEnabled()) {
+      ambiente = "test";
+    } else {
+      return NextResponse.json(
+        errorResponse('Firma en ambiente "test" no permitida sin ALLOW_TEST_MODE o configuración SIFEN en test.'),
+        { status: 400 }
+      );
+    }
   }
 
   const cscCfg = cfg.csc == null ? "" : String(cfg.csc).trim();

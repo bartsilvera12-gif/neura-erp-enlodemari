@@ -137,6 +137,26 @@ Rutas bajo **`/api/notas-credito/[id]/sifen/...`** donde `[id]` es el UUID de `n
 
 **Query opcional:** `?debug=1` en xml/firmar incluye el XML en la respuesta; `?debug=1` en enviar incluye SOAP; `?debug=1` en consulta-lote incluye cuerpo SOAP.
 
+**SIFEN test con empresa en producción:** si en el servidor está `ALLOW_TEST_MODE=true` (o `1` / `yes`), los endpoints `*-test` de facturas y NC llaman a **SET TEST** aunque `empresa_sifen_config.ambiente` sea `produccion`. Sin esa variable, los `*-test` siguen exigiendo ambiente `test` en configuración.
+
+---
+
+#### GET /api/config/allow-test-mode
+
+Sesión requerida. Respuesta `data`: `{ allowSifenTestOverride, empresa_sifen_ambiente }` — indica si aplica el override y el ambiente configurado para la empresa.
+
+---
+
+#### GET /api/notas-credito
+
+Listado global de notas de crédito del tenant. Query params opcionales: `desde`, `hasta` (fecha `YYYY-MM-DD`), `cliente_id`, `estado_erp`, `estado_sifen`, `usuario_id`, `factura_id`, `buscar` (motivo), `cdc` (fragmento, ≥8 caracteres), `con_error` (`1` | `0`), `page`, `limit` (máx. 200).
+
+---
+
+#### GET /api/notas-credito/[id]
+
+Detalle de una NC: cabecera, electrónica, cliente, factura y **eventos** de auditoría ordenados del más reciente al más antiguo.
+
 ---
 
 ### Pagos

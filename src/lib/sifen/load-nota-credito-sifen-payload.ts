@@ -2,6 +2,11 @@ import type { AppSupabaseClient } from "@/lib/supabase/schema";
 import type { SifenNotaCreditoPayload } from "./types";
 import type { AmbienteSifen } from "./types";
 
+export type LoadNotaCreditoSifenPayloadOpts = {
+  /** Si se define, el XML rDE usa este ambiente (p. ej. test con ALLOW_TEST_MODE + pipeline *-test). */
+  ambienteDeXml?: AmbienteSifen;
+};
+
 export type LoadNcSifenPayloadFailure =
   | { status: 400; message: string }
   | { status: 404; message: string }
@@ -22,7 +27,8 @@ function ambienteDesdeConfigRow(raw: unknown): AmbienteSifen {
 export async function loadValidatedNotaCreditoSifenPayload(
   supabase: AppSupabaseClient,
   empresaId: string,
-  notaCreditoId: string
+  notaCreditoId: string,
+  opts?: LoadNotaCreditoSifenPayloadOpts
 ): Promise<LoadNcSifenPayloadResult> {
   const nid = notaCreditoId.trim();
 
@@ -217,9 +223,12 @@ export async function loadValidatedNotaCreditoSifenPayload(
     return { ok: false, error: { status: 400, message: "Configuración SIFEN incompleta (RUC / razón social)." } };
   }
 
+  const ambienteCfg = ambienteDesdeConfigRow(cfg.ambiente);
+  const ambiente = opts?.ambienteDeXml ?? ambienteCfg;
+
   return {
     ok: true,
     payload,
-    ambiente: ambienteDesdeConfigRow(cfg.ambiente),
+    ambiente,
   };
 }

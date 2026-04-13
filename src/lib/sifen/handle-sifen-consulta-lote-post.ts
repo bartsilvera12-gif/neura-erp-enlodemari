@@ -10,6 +10,7 @@ import {
 } from "@/lib/sifen/consulta-lote-sifen-test";
 import { downloadSifenCertificadoObject } from "@/lib/sifen/sifen-certificados-storage";
 import { toFacturaElectronicaDto } from "@/lib/sifen/to-factura-electronica-dto";
+import { isExplicitSifenTestOverrideEnabled } from "@/lib/env/allow-test-mode";
 import type {
   AmbienteSifen,
   SifenApiConsultaLoteTestDetalle,
@@ -142,14 +143,16 @@ export async function handleSifenConsultaLotePost(
     });
   }
 
-  if (options.soloAmbienteTest && ambiente !== "test") {
+  if (options.soloAmbienteTest && ambiente !== "test" && !isExplicitSifenTestOverrideEnabled()) {
     return NextResponse.json(
       errorResponse(
-        'Este endpoint solo opera con configuración SIFEN en ambiente "test". Use POST .../sifen/consulta-lote para producción.'
+        'Este endpoint solo opera con configuración SIFEN en ambiente "test", o bien con ALLOW_TEST_MODE=true en el servidor (consulta SET TEST). Use POST .../sifen/consulta-lote para producción real.'
       ),
       { status: 400 }
     );
   }
+
+  const ambienteSoap: AmbienteSifen = options.soloAmbienteTest ? "test" : ambiente;
 
   if (!cfg.activo) {
     return NextResponse.json(errorResponse("La configuración SIFEN está inactiva."), { status: 400 });
@@ -200,7 +203,7 @@ export async function handleSifenConsultaLotePost(
     resp = await consultarLoteSifen({
       dProtConsLote: protRaw,
       empresaConfig: {
-        ambiente,
+        ambiente: ambienteSoap,
         certificadoP12: p12Dl.data,
         certificadoPassword: p12Password,
       },
@@ -208,7 +211,7 @@ export async function handleSifenConsultaLotePost(
     });
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
-    const label = ambiente === "produccion" ? "SIFEN producción" : "SIFEN TEST";
+    const label = ambienteSoap === "produccion" ? "SIFEN producción" : "SIFEN TEST";
     return NextResponse.json(errorResponse(`Fallo al llamar a ${label} (consulta-lote): ${m}`), {
       status: 502,
     });

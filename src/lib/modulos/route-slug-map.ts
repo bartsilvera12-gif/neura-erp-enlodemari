@@ -10,6 +10,7 @@ const SIDEBAR_SLUG_HREF_ORDER: { slug: string; href: string }[] = [
   { slug: "historial-omnicanal", href: "/dashboard/historial-omnicanal" },
   { slug: "colas-agentes", href: "/dashboard/colas-agentes" },
   { slug: "ventas", href: "/ventas" },
+  { slug: "notas_credito", href: "/notas-credito" },
   { slug: "inventario", href: "/inventario" },
   { slug: "clientes", href: "/clientes" },
   { slug: "compras", href: "/compras" },
@@ -29,6 +30,7 @@ export function isModuleSlugGranted(routeSlug: string, grantedSlugs: Set<string>
   if (grantedSlugs.has(routeSlug)) return true;
   if (routeSlug === "conversaciones" && grantedSlugs.has("omnicanal")) return true;
   if (routeSlug === "gestion-clientes" && grantedSlugs.has("clientes")) return true;
+  if (routeSlug === "notas_credito" && grantedSlugs.has("ventas")) return true;
   return false;
 }
 
@@ -70,6 +72,7 @@ export function pathRequiresModuleSlug(pathname: string): string | null {
   if (p.startsWith("/usuarios")) return "usuarios";
 
   if (p.startsWith("/dashboard")) return "conversaciones";
+  if (p.startsWith("/notas-credito")) return "notas_credito";
   if (p.startsWith("/ventas")) return "ventas";
   if (p.startsWith("/inventario")) return "inventario";
   if (p.startsWith("/clientes")) return "clientes";

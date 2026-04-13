@@ -46,8 +46,9 @@ function labelEstadoSifen(e: string | null) {
 
 function nextNcSifenStep(
   nc: NotaCreditoListItemDTO,
-  opts: { deAprobado: boolean; puedeCancelarDe: boolean }
+  opts: { deAprobado: boolean; puedeCancelarDe: boolean; canUseSifenTestUi: boolean }
 ): { url: string; label: string } | null {
+  if (!opts.canUseSifenTestUi) return null;
   if (!opts.deAprobado || opts.puedeCancelarDe) return null;
   if (nc.estado_erp === "anulada_borrador" || nc.estado_erp === "aprobada" || nc.estado_erp === "rechazada") {
     return null;
@@ -104,6 +105,11 @@ export function FacturaCorreccionFiscalNC({
   const [submitting, setSubmitting] = useState(false);
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [sifenNcId, setSifenNcId] = useState<string | null>(null);
+  const [sifenTestUi, setSifenTestUi] = useState<{
+    canUse: boolean;
+    override: boolean;
+    empresaAmbiente: string;
+  } | null>(null);
 
   const monedaLabel = moneda === "USD" ? "USD" : "Gs.";
 
@@ -111,7 +117,26 @@ export function FacturaCorreccionFiscalNC({
     setLoading(true);
     setFlash(null);
     try {
-      const res = await fetchWithSupabaseSession(`/api/facturas/${facturaId}/notas-credito`, { cache: "no-store" });
+      const [resNc, resCfg] = await Promise.all([
+        fetchWithSupabaseSession(`/api/facturas/${facturaId}/notas-credito`, { cache: "no-store" }),
+        fetchWithSupabaseSession(`/api/config/allow-test-mode`, { cache: "no-store" }),
+      ]);
+      if (resCfg.ok) {
+        const jc = (await resCfg.json()) as {
+          success?: boolean;
+          data?: { allowSifenTestOverride?: boolean; empresa_sifen_ambiente?: string };
+        };
+        if (jc.success && jc.data) {
+          const amb = jc.data.empresa_sifen_ambiente === "produccion" ? "produccion" : "test";
+          const override = !!jc.data.allowSifenTestOverride;
+          setSifenTestUi({ canUse: override || amb === "test", override, empresaAmbiente: amb });
+        } else {
+          setSifenTestUi({ canUse: false, override: false, empresaAmbiente: "test" });
+        }
+      } else {
+        setSifenTestUi({ canUse: false, override: false, empresaAmbiente: "test" });
+      }
+      const res = resNc;
       const j = (await res.json()) as NcApiGet;
       if (!res.ok || !j.success || !j.data) {
         setItems([]);
@@ -176,7 +201,11 @@ export function FacturaCorreccionFiscalNC({
   }
 
   async function ejecutarPasoSifen(nc: NotaCreditoListItemDTO) {
-    const step = nextNcSifenStep(nc, { deAprobado, puedeCancelarDe });
+    const step = nextNcSifenStep(nc, {
+      deAprobado,
+      puedeCancelarDe,
+      canUseSifenTestUi: sifenTestUi?.canUse ?? false,
+    });
     if (!step) return;
     setSifenNcId(nc.id);
     setFlash(null);
@@ -222,7 +251,21 @@ export function FacturaCorreccionFiscalNC({
   return (
     <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-5 space-y-4">
       <div>
-        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Corrección fiscal</h3>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+          <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Corrección fiscal</h3>
+          <Link
+            href="/notas-credito"
+            className="text-[11px] font-semibold text-[#0EA5E9] hover:underline"
+          >
+            Ver módulo global de NC →
+          </Link>
+        </div>
+        {sifenTestUi?.override && sifenTestUi.empresaAmbiente === "produccion" && (
+          <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-950">
+            Modo SIFEN TEST: el servidor tiene ALLOW_TEST_MODE; los envíos de prueba van a SET TEST aunque la empresa esté
+            en producción.
+          </div>
+        )}
         <p className="text-xs text-slate-500 mt-1 leading-relaxed">
           Si el documento electrónico está <span className="font-semibold">aprobado</span> y todavía podés cancelarlo
           dentro del plazo, usá <span className="font-semibold">Cancelar factura (DE)</span> abajo: es la vía prioritaria.
@@ -274,6 +317,13 @@ export function FacturaCorreccionFiscalNC({
           }`}
         >
           {flash.text}
+        </div>
+      )}
+
+      {sifenTestUi && !sifenTestUi.canUse && deAprobado && !puedeCancelarDe && (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+          Flujo SIFEN <span className="font-semibold">test</span> no disponible: configurá la empresa en ambiente test o
+          habilitá <span className="font-mono">ALLOW_TEST_MODE=true</span> en el servidor.
         </div>
       )}
 
@@ -329,7 +379,11 @@ export function FacturaCorreccionFiscalNC({
                     <td className="py-2 pr-2 font-mono text-[10px] text-slate-500">{nc.id.slice(0, 8)}…</td>
                     <td className="py-2 pr-2">
                       {(() => {
-                        const step = nextNcSifenStep(nc, { deAprobado, puedeCancelarDe });
+                        const step = nextNcSifenStep(nc, {
+                          deAprobado,
+                          puedeCancelarDe,
+                          canUseSifenTestUi: sifenTestUi?.canUse ?? false,
+                        });
                         if (!step) {
                           return <span className="text-slate-300">—</span>;
                         }

@@ -62,3 +62,42 @@ export type NotaCreditoCreateBody = {
   motivo: string;
   observacion_interna?: string | null;
 };
+
+/** Fila del listado global `/notas-credito`. */
+export type NotaCreditoGlobalListItemDTO = {
+  id: string;
+  monto: number;
+  motivo: string;
+  observacion_interna: string | null;
+  estado_erp: NotaCreditoEstadoErp;
+  created_at: string;
+  factura_id: string;
+  factura_numero: string | null;
+  cliente_id: string;
+  cliente_display: string;
+  moneda_snapshot: string;
+  created_by_user_id: string | null;
+  created_by_email_snapshot: string | null;
+  created_by_nombre_snapshot: string | null;
+  estado_sifen: NotaCreditoEstadoSifen | null;
+  cdc: string | null;
+  cdc_factura_origen: string | null;
+  last_error_resumido: string | null;
+};
+
+export type NotaCreditoEventoAuditoriaDTO = {
+  id: string;
+  tipo_evento: string;
+  detalle_json: Record<string, unknown>;
+  created_at: string;
+  actor_user_id: string | null;
+};
+
+/** Detalle global + auditoría. */
+export type NotaCreditoGlobalDetailDTO = {
+  nota_credito: Record<string, unknown>;
+  nota_credito_electronica: Record<string, unknown> | null;
+  cliente: { id: string; display: string; ruc: string | null };
+  factura: { id: string; numero_factura: string | null; fecha: string | null; monto: number | null; moneda: string | null };
+  eventos: NotaCreditoEventoAuditoriaDTO[];
+};

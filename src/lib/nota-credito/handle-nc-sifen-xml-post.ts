@@ -5,6 +5,7 @@ import { successResponse, errorResponse } from "@/lib/api/response";
 import { loadValidatedNotaCreditoSifenPayload } from "@/lib/sifen/load-nota-credito-sifen-payload";
 import { buildOfficialRdeNotaCreditoElectronicaXml } from "@/lib/sifen/rde-nc-xml";
 import type { BuildRdeXmlOptions } from "@/lib/sifen/rde-xml";
+import type { AmbienteSifen } from "@/lib/sifen/types";
 import {
   buildSifenNcXmlObjectPath,
   ensureSifenStorageBucket,
@@ -29,8 +30,10 @@ export async function handleNcSifenXmlPost(opts: {
   supabase: AppSupabaseClient;
   notaCreditoId: string;
   debugXml: boolean;
+  /** Ambiente embebido en el rDE (alinear con SET TEST en pipeline controlado). */
+  xmlAmbienteOverride?: AmbienteSifen;
 }): Promise<NextResponse> {
-  const { auth, supabase, notaCreditoId, debugXml } = opts;
+  const { auth, supabase, notaCreditoId, debugXml, xmlAmbienteOverride } = opts;
   const nid = notaCreditoId.trim();
 
   const { data: ncRow, error: errNc } = await supabase
@@ -85,7 +88,9 @@ export async function handleNcSifenXmlPost(opts: {
     );
   }
 
-  const loaded = await loadValidatedNotaCreditoSifenPayload(supabase, auth.empresa_id, nid);
+  const loaded = await loadValidatedNotaCreditoSifenPayload(supabase, auth.empresa_id, nid, {
+    ambienteDeXml: xmlAmbienteOverride,
+  });
   if (!loaded.ok) {
     return NextResponse.json(errorResponse(loaded.error.message), { status: loaded.error.status });
   }

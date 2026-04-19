@@ -12,6 +12,7 @@ import {
 } from "@/lib/chat/omnicanal-scope";
 import { insertChatRoutingEvent, updateContactLastRouted } from "@/lib/chat/routing-audit";
 import { isMissingColumnError } from "@/lib/chat/postgres-column-error";
+import { isAgentSessionOnline } from "@/lib/chat/agent-presence";
 import { batchFetchOmnicanalOperatorRoles, type OmnicanalOperatorRole } from "@/lib/chat/omnicanal-supervision-read";
 import type { AppSupabaseClient } from "@/lib/supabase/schema";
 
@@ -789,6 +790,7 @@ export type ChatAgentDirectoryRow = {
   usuario_id: string;
   nombre: string;
   email: string;
+  /** Sesión en línea: derivado de `last_heartbeat_at` (≤60 s) cuando existe la columna. */
   is_online: boolean;
   /** ready | offline — autoasignación solo en ready. */
   operational_status: string;
@@ -911,6 +913,10 @@ export async function listChatAgentsDirectory(): Promise<ChatAgentDirectoryRow[]
     const uid = row.usuario_id as string;
     const u = usuarioById[uid];
     const nombre = (u?.nombre?.trim() || u?.email?.trim() || "—") as string;
+    const hasHeartbeatField = Object.prototype.hasOwnProperty.call(row, "last_heartbeat_at");
+    const sessionOnline = hasHeartbeatField
+      ? isAgentSessionOnline((row.last_heartbeat_at as string | null) ?? null)
+      : Boolean(row.is_online);
     return {
       id: row.id as string,
       queue_id: qid,
@@ -918,7 +924,7 @@ export async function listChatAgentsDirectory(): Promise<ChatAgentDirectoryRow[]
       usuario_id: uid,
       nombre,
       email: (u?.email as string) ?? "",
-      is_online: Boolean(row.is_online),
+      is_online: sessionOnline,
       operational_status:
         (row.operational_status as string | undefined)?.trim() === "offline" ? "offline" : "ready",
       max_conversations: (row.max_conversations as number) ?? 5,

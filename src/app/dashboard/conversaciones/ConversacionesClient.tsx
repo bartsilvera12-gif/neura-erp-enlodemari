@@ -32,6 +32,7 @@ import {
   type InboxCabeceraInsignia,
   type SupervisorAgentLoadRow,
 } from "@/lib/chat/chat-ops-actions";
+import { INBOX_HEARTBEAT_INTERVAL_MS } from "@/lib/chat/agent-presence";
 import { formatWaitHuman } from "@/lib/chat/format-wait-human";
 import { listActiveQuickRepliesForChannel } from "@/lib/chat/quick-replies-actions";
 import { ArrowLeftRight, Flame, Mic, Paperclip, Square, UserRound, Zap } from "lucide-react";
@@ -690,7 +691,7 @@ export function ConversacionesClient({
   useEffect(() => {
     if (mode !== "inbox" || !opInQueues) return;
     void touchChatAgentInboxHeartbeat();
-    const id = window.setInterval(() => void touchChatAgentInboxHeartbeat(), 90_000);
+    const id = window.setInterval(() => void touchChatAgentInboxHeartbeat(), INBOX_HEARTBEAT_INTERVAL_MS);
     const onVis = () => {
       if (document.visibilityState === "visible") void touchChatAgentInboxHeartbeat();
     };

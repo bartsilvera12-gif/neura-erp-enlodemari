@@ -1,3 +1,4 @@
+import { isAgentSessionOnline } from "@/lib/chat/agent-presence";
 import type { SupabaseAdmin } from "@/lib/chat/types";
 
 export type EligibleAgentRow = {
@@ -19,14 +20,17 @@ export async function loadEligibleAgentsForQueue(
 ): Promise<EligibleAgentRow[]> {
   const { data, error } = await supabase
     .from("chat_agents")
-    .select("id, max_conversations, priority_in_queue")
+    .select("id, max_conversations, priority_in_queue, last_heartbeat_at")
     .eq("empresa_id", empresaId)
     .eq("queue_id", queueId)
     .eq("is_active", true)
     .eq("receives_new_chats", true)
     .eq("operational_status", "ready");
   if (error) throw new Error(error.message);
-  return (data ?? []) as EligibleAgentRow[];
+  const rows = (data ?? []) as (EligibleAgentRow & { last_heartbeat_at?: string | null })[];
+  return rows
+    .filter((r) => isAgentSessionOnline(r.last_heartbeat_at ?? null))
+    .map(({ id, max_conversations, priority_in_queue }) => ({ id, max_conversations, priority_in_queue }));
 }
 
 export async function countActiveConversationsByAgent(

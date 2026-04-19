@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import type { AssignConversationResult } from "@/lib/chat/assign-conversation-service";
+import { isAgentSessionOnline } from "@/lib/chat/agent-presence";
 import { parseAssignmentState, pickLeastLoad, pickRoundRobin } from "@/lib/chat/queue-assignment-strategy";
 import { quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
 import { assertAllowedChatDataSchema } from "@/lib/supabase/chat-data-schema";
@@ -129,14 +130,46 @@ export async function assignConversationPg(
   }
 
   const agentsRes = await pool.query(
-    `SELECT id, max_conversations, priority_in_queue
+    `SELECT id, max_conversations, priority_in_queue, operational_status, last_heartbeat_at
      FROM ${agT}
      WHERE empresa_id = $1::uuid AND queue_id = $2::uuid
-       AND is_active = true AND receives_new_chats = true AND operational_status = 'ready'
+       AND is_active = true AND receives_new_chats = true
      ORDER BY priority_in_queue DESC, id ASC`,
     [empresaId, queue.id]
   );
-  const agents = agentsRes.rows as { id: string; max_conversations: number; priority_in_queue: number }[];
+  const agentRows = agentsRes.rows as {
+    id: string;
+    max_conversations: number;
+    priority_in_queue: number;
+    operational_status: string | null;
+    last_heartbeat_at: string | Date | null;
+  }[];
+
+  const assignDbg = process.env.OMNICANAL_ASSIGN_DEBUG === "1";
+  const idShort = (id: string) => id.slice(0, 8);
+
+  let discardedPause = 0;
+  let discardedOffline = 0;
+  const agents: { id: string; max_conversations: number; priority_in_queue: number }[] = [];
+  for (const ar of agentRows) {
+    const status = String(ar.operational_status ?? "").trim();
+    if (status !== "ready") {
+      discardedPause++;
+      if (assignDbg) console.info(`[assignConversationPg] discard pause agent=${idShort(ar.id)}`);
+      continue;
+    }
+    if (!isAgentSessionOnline(ar.last_heartbeat_at)) {
+      discardedOffline++;
+      if (assignDbg) console.info(`[assignConversationPg] discard offline agent=${idShort(ar.id)}`);
+      continue;
+    }
+    agents.push({
+      id: ar.id,
+      max_conversations: ar.max_conversations,
+      priority_in_queue: ar.priority_in_queue,
+    });
+  }
+
   if (agents.length === 0) {
     const ts = new Date().toISOString();
     await pool.query(
@@ -148,6 +181,15 @@ export async function assignConversationPg(
        WHERE id = $3::uuid AND empresa_id = $4::uuid`,
       [queue.id, ts, cid, empresaId]
     );
+    if (agentRows.length > 0) {
+      console.info("[assignConversationPg] no_agent", {
+        conversation_id: cid,
+        queue_id: queue.id,
+        total_in_queue: agentRows.length,
+        discarded_pause: discardedPause,
+        discarded_offline: discardedOffline,
+      });
+    }
     return { ok: true, assigned: false, reason: "no_agent" };
   }
 
@@ -167,7 +209,11 @@ export async function assignConversationPg(
   const eligible = agents.filter((a) => {
     const load = loadById.get(a.id) ?? 0;
     const cap = Math.max(1, a.max_conversations ?? 5);
-    return load < cap;
+    if (load >= cap) {
+      if (assignDbg) console.info(`[assignConversationPg] discard load agent=${idShort(a.id)} load=${load} cap=${cap}`);
+      return false;
+    }
+    return true;
   });
   if (eligible.length === 0) {
     const ts = new Date().toISOString();
@@ -180,6 +226,11 @@ export async function assignConversationPg(
        WHERE id = $3::uuid AND empresa_id = $4::uuid`,
       [queue.id, ts, cid, empresaId]
     );
+    console.info("[assignConversationPg] no_agent_all_at_capacity", {
+      conversation_id: cid,
+      queue_id: queue.id,
+      candidates_ready_online: agents.length,
+    });
     return { ok: true, assigned: false, reason: "no_agent" };
   }
 

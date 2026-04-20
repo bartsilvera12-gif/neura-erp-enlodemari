@@ -26,6 +26,7 @@ import {
   SORTEO_COMPROBANTE_URL_FIELD,
 } from "@/lib/sorteos/sorteo-order-from-chat";
 import { parseMoneyPy } from "@/lib/sorteos/parse-money-py";
+import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 
 type ConversationFlowState = {
   id: string;
@@ -377,10 +378,15 @@ export function createFlowEngine(ctx: FlowEngineContext) {
     const conversation = await getConversationFlowState(conversationId);
     if (!conversation) throw new Error("Conversación no encontrada");
 
-    const outbound = await resolveOutboundTextContextFromIds(supabase, {
-      contactId: conversation.contact_id,
-      channelId: conversation.channel_id,
-    });
+    const ds = await fetchDataSchemaForEmpresaId(conversation.empresa_id);
+    const outbound = await resolveOutboundTextContextFromIds(
+      supabase,
+      {
+        contactId: conversation.contact_id,
+        channelId: conversation.channel_id,
+      },
+      { dataSchema: ds }
+    );
 
     if (outbound.provider === "meta") {
       return {

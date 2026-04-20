@@ -27,6 +27,18 @@ import {
 import type { AppSupabaseClient } from "@/lib/supabase/schema";
 import { getChatPostgresPool, quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
 import { isLikelyUnexposedTenantChatSchema } from "@/lib/supabase/chat-data-schema";
+import {
+  pgDeleteChatChannel,
+  pgInsertChatChannelMetaWhatsapp,
+  pgInsertGenericOmnichannelChannel,
+  pgInsertYCloudWhatsappChannel,
+  pgSelectChatChannelConfig,
+  pgSelectChatChannelMetaPrev,
+  pgUpdateChatChannelConfig,
+  pgUpdateChatChannelMetaWhatsapp,
+  pgUpdateGenericOmnichannelChannel,
+  pgUpdateYCloudWhatsappChannel,
+} from "@/lib/chat/chat-channels-mutate-pg";
 import { isInvalidPostgrestSchemaError } from "@/lib/chat/postgrest-schema-error";
 import { normalizeChannelType } from "@/lib/chat/channel-type-utils";
 
@@ -741,6 +753,13 @@ function mapChatChannelRow(r: Record<string, unknown>): ChatChannelRow {
 const POSTGREST_TENANT_SCHEMA_HINT =
   "PostgREST no puede usar el schema de datos de esta empresa. Configurá SUPABASE_DB_URL o DIRECT_URL (pooler Postgres) en el entorno del servidor, o agregá el schema en Supabase → Settings → API → Exposed schemas.";
 
+function postgrestMutationError(dataSchema: string, message: string): Error {
+  if (isLikelyUnexposedTenantChatSchema(dataSchema) && isInvalidPostgrestSchemaError(message)) {
+    return new Error(POSTGREST_TENANT_SCHEMA_HINT);
+  }
+  return new Error(message);
+}
+
 async function tryFetchChatChannelsFromPg(
   dataSchema: string,
   empresaId: string
@@ -883,22 +902,28 @@ export type YCloudWhatsappChannelInput = {
 
 /** WhatsApp vía YCloud (coexistencia). Sin ruta omnicanal Meta. */
 export async function saveYCloudWhatsappChannel(input: YCloudWhatsappChannelInput): Promise<string> {
-  const { supabase, empresa_id } = await requireEmpresaTenantServiceRole();
+  const { supabase, empresa_id, dataSchema } = await requireEmpresaTenantServiceRole();
+  const pool = getChatPostgresPool();
+  const tenantPg = isLikelyUnexposedTenantChatSchema(dataSchema) && pool != null;
   const existingId = typeof input.id === "string" && input.id.trim().length > 0 ? input.id.trim() : undefined;
   let config: Record<string, unknown> = {};
   if (existingId) {
-    const { data: prevRow } = await supabase
-      .from("chat_channels")
-      .select("config")
-      .eq("id", existingId)
-      .eq("empresa_id", empresa_id)
-      .maybeSingle();
+    let prevRaw: unknown = null;
+    if (tenantPg) {
+      prevRaw = await pgSelectChatChannelConfig(pool!, dataSchema, empresa_id, existingId);
+    } else {
+      const { data: prevRow, error: prevErr } = await supabase
+        .from("chat_channels")
+        .select("config")
+        .eq("id", existingId)
+        .eq("empresa_id", empresa_id)
+        .maybeSingle();
+      if (prevErr) throw postgrestMutationError(dataSchema, prevErr.message);
+      prevRaw = prevRow?.config;
+    }
     const prev =
-      prevRow?.config &&
-      typeof prevRow.config === "object" &&
-      prevRow.config !== null &&
-      !Array.isArray(prevRow.config)
-        ? ({ ...(prevRow.config as Record<string, unknown>) } as Record<string, unknown>)
+      prevRaw && typeof prevRaw === "object" && prevRaw !== null && !Array.isArray(prevRaw)
+        ? ({ ...(prevRaw as Record<string, unknown>) } as Record<string, unknown>)
         : {};
     config = { ...prev };
   }
@@ -955,17 +980,48 @@ export async function saveYCloudWhatsappChannel(input: YCloudWhatsappChannelInpu
     config,
   };
 
+  const updatedAt = new Date().toISOString();
+
   if (existingId) {
+    if (tenantPg) {
+      const updated = await pgUpdateYCloudWhatsappChannel(pool!, dataSchema, empresa_id, existingId, {
+        nombre: base.nombre,
+        type: base.type,
+        provider: base.provider,
+        provider_channel_id: base.provider_channel_id,
+        activo: base.activo,
+        connection_mode: base.connection_mode,
+        config_status: base.config_status,
+        config: base.config,
+        updated_at: updatedAt,
+      });
+      if (!updated) throw new Error("No se pudo actualizar el canal.");
+      return existingId;
+    }
     const { data: updated, error } = await supabase
       .from("chat_channels")
-      .update({ ...base, updated_at: new Date().toISOString() })
+      .update({ ...base, updated_at: updatedAt })
       .eq("id", existingId)
       .eq("empresa_id", empresa_id)
       .select("id")
       .maybeSingle();
-    if (error) throw new Error(error.message);
+    if (error) throw postgrestMutationError(dataSchema, error.message);
     if (!updated) throw new Error("No se pudo actualizar el canal.");
     return existingId;
+  }
+
+  if (tenantPg) {
+    return pgInsertYCloudWhatsappChannel(pool!, dataSchema, {
+      empresa_id,
+      nombre: base.nombre,
+      type: base.type,
+      provider: base.provider,
+      provider_channel_id: base.provider_channel_id,
+      activo: base.activo,
+      connection_mode: base.connection_mode,
+      config_status: base.config_status,
+      config: base.config,
+    });
   }
 
   const { data: inserted, error } = await supabase
@@ -976,7 +1032,7 @@ export async function saveYCloudWhatsappChannel(input: YCloudWhatsappChannelInpu
     })
     .select("id")
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw postgrestMutationError(dataSchema, error.message);
   const newId = inserted?.id as string | undefined;
   if (!newId) throw new Error("No se pudo crear el canal.");
   return newId;
@@ -999,25 +1055,31 @@ export async function patchChatChannelQuickRepliesSectionState(
   channelId: string,
   slice: { active: boolean; expanded: boolean }
 ): Promise<void> {
-  const { supabase, empresa_id } = await requireEmpresaTenantServiceRole();
+  const { supabase, empresa_id, dataSchema } = await requireEmpresaTenantServiceRole();
+  const pool = getChatPostgresPool();
+  const tenantPg = isLikelyUnexposedTenantChatSchema(dataSchema) && pool != null;
   const id = channelId.trim();
   if (!id) throw new Error("Canal inválido.");
 
-  const { data: prevRow, error: fetchErr } = await supabase
-    .from("chat_channels")
-    .select("config")
-    .eq("id", id)
-    .eq("empresa_id", empresa_id)
-    .maybeSingle();
-  if (fetchErr) throw new Error(fetchErr.message);
-  if (!prevRow) throw new Error("Canal no encontrado.");
+  let rawCfg: unknown = null;
+  if (tenantPg) {
+    rawCfg = await pgSelectChatChannelConfig(pool!, dataSchema, empresa_id, id);
+    if (rawCfg === null) throw new Error("Canal no encontrado.");
+  } else {
+    const { data: prevRow, error: fetchErr } = await supabase
+      .from("chat_channels")
+      .select("config")
+      .eq("id", id)
+      .eq("empresa_id", empresa_id)
+      .maybeSingle();
+    if (fetchErr) throw postgrestMutationError(dataSchema, fetchErr.message);
+    rawCfg = prevRow?.config;
+    if (!prevRow) throw new Error("Canal no encontrado.");
+  }
 
   const prevCfg =
-    prevRow.config &&
-    typeof prevRow.config === "object" &&
-    prevRow.config !== null &&
-    !Array.isArray(prevRow.config)
-      ? ({ ...(prevRow.config as Record<string, unknown>) } as Record<string, unknown>)
+    rawCfg && typeof rawCfg === "object" && rawCfg !== null && !Array.isArray(rawCfg)
+      ? ({ ...(rawCfg as Record<string, unknown>) } as Record<string, unknown>)
       : {};
 
   const prevFsRaw = prevCfg.form_section_state;
@@ -1030,32 +1092,45 @@ export async function patchChatChannelQuickRepliesSectionState(
   prevCfg.form_section_state = prevFs;
   prevCfg.quick_replies_inbox_enabled = slice.active;
 
+  const updatedAt = new Date().toISOString();
+
+  if (tenantPg) {
+    await pgUpdateChatChannelConfig(pool!, dataSchema, empresa_id, id, prevCfg, updatedAt);
+    return;
+  }
+
   const { error } = await supabase
     .from("chat_channels")
-    .update({ config: prevCfg, updated_at: new Date().toISOString() })
+    .update({ config: prevCfg, updated_at: updatedAt })
     .eq("id", id)
     .eq("empresa_id", empresa_id);
 
-  if (error) throw new Error(error.message);
+  if (error) throw postgrestMutationError(dataSchema, error.message);
 }
 
 export async function saveGenericOmnichannelChannel(input: GenericOmnichannelChannelInput): Promise<string> {
-  const { supabase, empresa_id } = await requireEmpresaTenantServiceRole();
+  const { supabase, empresa_id, dataSchema } = await requireEmpresaTenantServiceRole();
+  const pool = getChatPostgresPool();
+  const tenantPg = isLikelyUnexposedTenantChatSchema(dataSchema) && pool != null;
   const existingId = typeof input.id === "string" && input.id.trim().length > 0 ? input.id.trim() : undefined;
   let config: Record<string, unknown> = input.config ? { ...input.config } : {};
   if (existingId) {
-    const { data: prevRow } = await supabase
-      .from("chat_channels")
-      .select("config")
-      .eq("id", existingId)
-      .eq("empresa_id", empresa_id)
-      .maybeSingle();
+    let prevRaw: unknown = null;
+    if (tenantPg) {
+      prevRaw = await pgSelectChatChannelConfig(pool!, dataSchema, empresa_id, existingId);
+    } else {
+      const { data: prevRow, error: prevErr } = await supabase
+        .from("chat_channels")
+        .select("config")
+        .eq("id", existingId)
+        .eq("empresa_id", empresa_id)
+        .maybeSingle();
+      if (prevErr) throw postgrestMutationError(dataSchema, prevErr.message);
+      prevRaw = prevRow?.config;
+    }
     const prev =
-      prevRow?.config &&
-      typeof prevRow.config === "object" &&
-      prevRow.config !== null &&
-      !Array.isArray(prevRow.config)
-        ? ({ ...(prevRow.config as Record<string, unknown>) } as Record<string, unknown>)
+      prevRaw && typeof prevRaw === "object" && prevRaw !== null && !Array.isArray(prevRaw)
+        ? ({ ...(prevRaw as Record<string, unknown>) } as Record<string, unknown>)
         : {};
     config = { ...prev, ...config };
   }
@@ -1076,17 +1151,50 @@ export async function saveGenericOmnichannelChannel(input: GenericOmnichannelCha
     config,
   };
 
+  const updatedAt = new Date().toISOString();
+
   if (existingId) {
+    if (tenantPg) {
+      const updated = await pgUpdateGenericOmnichannelChannel(pool!, dataSchema, empresa_id, existingId, {
+        nombre: base.nombre,
+        type: base.type,
+        meta_phone_number_id: null,
+        provider: base.provider,
+        provider_channel_id: null,
+        activo: base.activo,
+        connection_mode: "standard",
+        config_status: base.config_status,
+        config: base.config,
+        updated_at: updatedAt,
+      });
+      if (!updated) throw new Error("No se pudo actualizar el canal.");
+      return existingId;
+    }
     const { data: updated, error } = await supabase
       .from("chat_channels")
-      .update({ ...base, updated_at: new Date().toISOString() })
+      .update({ ...base, updated_at: updatedAt })
       .eq("id", existingId)
       .eq("empresa_id", empresa_id)
       .select("id")
       .maybeSingle();
-    if (error) throw new Error(error.message);
+    if (error) throw postgrestMutationError(dataSchema, error.message);
     if (!updated) throw new Error("No se pudo actualizar el canal.");
     return existingId;
+  }
+
+  if (tenantPg) {
+    return pgInsertGenericOmnichannelChannel(pool!, dataSchema, {
+      empresa_id,
+      nombre: base.nombre,
+      type: base.type,
+      meta_phone_number_id: null,
+      provider: base.provider,
+      provider_channel_id: null,
+      activo: base.activo,
+      connection_mode: "standard",
+      config_status: base.config_status,
+      config: base.config,
+    });
   }
 
   const { data: inserted, error } = await supabase
@@ -1097,7 +1205,7 @@ export async function saveGenericOmnichannelChannel(input: GenericOmnichannelCha
     })
     .select("id")
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw postgrestMutationError(dataSchema, error.message);
   const newId = inserted?.id as string | undefined;
   if (!newId) throw new Error("No se pudo crear el canal.");
   return newId;
@@ -1106,6 +1214,9 @@ export async function saveGenericOmnichannelChannel(input: GenericOmnichannelCha
 /** Crea o actualiza canal WhatsApp Cloud API (Meta). Devuelve el id del canal. */
 export async function saveChatChannel(input: ChatChannelFormInput): Promise<string> {
   const { supabase, empresa_id, dataSchema } = await requireEmpresaTenantServiceRole();
+  const pool = getChatPostgresPool();
+  const tenantPg = isLikelyUnexposedTenantChatSchema(dataSchema) && pool != null;
+
   const pid = input.meta_phone_number_id.trim();
   if (!pid) throw new Error("Phone Number ID es obligatorio");
 
@@ -1118,25 +1229,38 @@ export async function saveChatChannel(input: ChatChannelFormInput): Promise<stri
   let previousMetaPhone: string | null = null;
   let existingToken: string | null = null;
   if (existingId) {
-    const { data: prevRow } = await supabase
-      .from("chat_channels")
-      .select("config, meta_phone_number_id, whatsapp_access_token")
-      .eq("id", existingId)
-      .eq("empresa_id", empresa_id)
-      .maybeSingle();
-    previousMetaPhone =
-      (prevRow as { meta_phone_number_id?: string | null } | null)?.meta_phone_number_id?.trim() || null;
-    existingToken =
-      (prevRow as { whatsapp_access_token?: string | null } | null)?.whatsapp_access_token?.trim() || null;
-    const prev =
-      prevRow?.config &&
-      typeof prevRow.config === "object" &&
-      prevRow.config !== null &&
-      !Array.isArray(prevRow.config)
-        ? ({ ...(prevRow.config as Record<string, unknown>) } as Record<string, unknown>)
-        : {};
-    config = { ...prev, phone_number_id: pid };
-    if (disp) config.display_phone_number = disp;
+    if (tenantPg) {
+      const pr = await pgSelectChatChannelMetaPrev(pool!, dataSchema, empresa_id, existingId);
+      previousMetaPhone = pr?.meta_phone_number_id?.trim() || null;
+      existingToken = pr?.whatsapp_access_token?.trim() || null;
+      const prev =
+        pr?.config && typeof pr.config === "object" && pr.config !== null && !Array.isArray(pr.config)
+          ? ({ ...(pr.config as Record<string, unknown>) } as Record<string, unknown>)
+          : {};
+      config = { ...prev, phone_number_id: pid };
+      if (disp) config.display_phone_number = disp;
+    } else {
+      const { data: prevRow, error: prevErr } = await supabase
+        .from("chat_channels")
+        .select("config, meta_phone_number_id, whatsapp_access_token")
+        .eq("id", existingId)
+        .eq("empresa_id", empresa_id)
+        .maybeSingle();
+      if (prevErr) throw postgrestMutationError(dataSchema, prevErr.message);
+      previousMetaPhone =
+        (prevRow as { meta_phone_number_id?: string | null } | null)?.meta_phone_number_id?.trim() || null;
+      existingToken =
+        (prevRow as { whatsapp_access_token?: string | null } | null)?.whatsapp_access_token?.trim() || null;
+      const prev =
+        prevRow?.config &&
+        typeof prevRow.config === "object" &&
+        prevRow.config !== null &&
+        !Array.isArray(prevRow.config)
+          ? ({ ...(prevRow.config as Record<string, unknown>) } as Record<string, unknown>)
+          : {};
+      config = { ...prev, phone_number_id: pid };
+      if (disp) config.display_phone_number = disp;
+    }
   } else if (disp) {
     config.display_phone_number = disp;
   }
@@ -1183,9 +1307,40 @@ export async function saveChatChannel(input: ChatChannelFormInput): Promise<stri
   };
 
   if (existingId) {
+    const updatedAt = new Date().toISOString();
+    if (tenantPg) {
+      const updated = await pgUpdateChatChannelMetaWhatsapp(pool!, dataSchema, empresa_id, existingId, {
+        nombre: base.nombre,
+        type: base.type,
+        meta_phone_number_id: base.meta_phone_number_id,
+        provider: base.provider,
+        provider_channel_id: base.provider_channel_id,
+        activo: base.activo,
+        connection_mode: base.connection_mode,
+        config_status: base.config_status,
+        config: base.config,
+        updated_at: updatedAt,
+        whatsapp_access_token_patch: tokenPatch ? tokenPatch : undefined,
+      });
+      if (!updated) {
+        throw new Error("No se pudo actualizar el canal (¿pertenece a tu empresa?).");
+      }
+      if (previousMetaPhone && previousMetaPhone !== pid) {
+        await deleteOmnichannelRouteByMetaPhone(previousMetaPhone);
+      }
+      await syncOmnichannelRouteForWhatsappChannel({
+        metaPhoneNumberId: pid,
+        empresaId: empresa_id,
+        channelId: existingId,
+        activo: input.activo,
+        dataSchema,
+      });
+      return existingId;
+    }
+
     const updatePayload: Record<string, unknown> = {
       ...base,
-      updated_at: new Date().toISOString(),
+      updated_at: updatedAt,
     };
     if (tokenPatch) {
       updatePayload.whatsapp_access_token = tokenPatch;
@@ -1198,7 +1353,7 @@ export async function saveChatChannel(input: ChatChannelFormInput): Promise<stri
       .select("id")
       .maybeSingle();
 
-    if (error) throw new Error(error.message);
+    if (error) throw postgrestMutationError(dataSchema, error.message);
     if (!updated) {
       throw new Error("No se pudo actualizar el canal (¿pertenece a tu empresa?).");
     }
@@ -1215,6 +1370,30 @@ export async function saveChatChannel(input: ChatChannelFormInput): Promise<stri
     return existingId;
   }
 
+  if (tenantPg) {
+    const newId = await pgInsertChatChannelMetaWhatsapp(pool!, dataSchema, {
+      empresa_id,
+      nombre: base.nombre,
+      type: base.type,
+      meta_phone_number_id: base.meta_phone_number_id,
+      provider: base.provider,
+      provider_channel_id: base.provider_channel_id,
+      activo: base.activo,
+      connection_mode: base.connection_mode,
+      config_status: base.config_status,
+      config: base.config,
+      whatsapp_access_token: tokenPatch || null,
+    });
+    await syncOmnichannelRouteForWhatsappChannel({
+      metaPhoneNumberId: pid,
+      empresaId: empresa_id,
+      channelId: newId,
+      activo: input.activo,
+      dataSchema,
+    });
+    return newId;
+  }
+
   const { data: inserted, error } = await supabase
     .from("chat_channels")
     .insert({
@@ -1225,7 +1404,7 @@ export async function saveChatChannel(input: ChatChannelFormInput): Promise<stri
     .select("id")
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) throw postgrestMutationError(dataSchema, error.message);
   const newId = inserted?.id as string | undefined;
   if (!newId) throw new Error("No se pudo obtener el id del canal creado.");
   await syncOmnichannelRouteForWhatsappChannel({
@@ -1352,16 +1531,29 @@ export async function approveComprobanteValidacion(validacionId: string): Promis
 }
 
 export async function deleteChatChannel(id: string): Promise<void> {
-  const { supabase, empresa_id } = await requireEmpresaTenantServiceRole();
-  const { data: prev } = await supabase
-    .from("chat_channels")
-    .select("meta_phone_number_id, provider")
-    .eq("id", id)
-    .eq("empresa_id", empresa_id)
-    .maybeSingle();
-  const { error } = await supabase.from("chat_channels").delete().eq("id", id).eq("empresa_id", empresa_id);
-  if (error) throw new Error(error.message);
-  const prov = String((prev as { provider?: string | null } | null)?.provider ?? "meta").toLowerCase();
-  const mp = (prev as { meta_phone_number_id?: string | null } | null)?.meta_phone_number_id?.trim();
+  const { supabase, empresa_id, dataSchema } = await requireEmpresaTenantServiceRole();
+  const pool = getChatPostgresPool();
+  const tenantPg = isLikelyUnexposedTenantChatSchema(dataSchema) && pool != null;
+
+  let prev: { meta_phone_number_id: string | null; provider: string | null } | null = null;
+
+  if (tenantPg) {
+    const del = await pgDeleteChatChannel(pool!, dataSchema, empresa_id, id);
+    prev = del ? { meta_phone_number_id: del.meta_phone_number_id, provider: del.provider } : null;
+  } else {
+    const { data: prevRow, error: selErr } = await supabase
+      .from("chat_channels")
+      .select("meta_phone_number_id, provider")
+      .eq("id", id)
+      .eq("empresa_id", empresa_id)
+      .maybeSingle();
+    if (selErr) throw postgrestMutationError(dataSchema, selErr.message);
+    const { error } = await supabase.from("chat_channels").delete().eq("id", id).eq("empresa_id", empresa_id);
+    if (error) throw postgrestMutationError(dataSchema, error.message);
+    prev = prevRow as typeof prev;
+  }
+
+  const prov = String(prev?.provider ?? "meta").toLowerCase();
+  const mp = prev?.meta_phone_number_id?.trim();
   if (mp && prov === "meta") await deleteOmnichannelRouteByMetaPhone(mp);
 }

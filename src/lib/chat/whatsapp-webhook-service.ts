@@ -875,7 +875,7 @@ export async function processInboundWebhookValue(
         const handoffText =
           "Te derivamos con un asesor humano. En breve te vamos a escribir desde este mismo número.";
         try {
-          const ctx = await resolveOutboundTextContextFromConversationId(supabase, conversationId);
+          const ctx = await resolveOutboundTextContextFromConversationId(supabase, conversationId, empresaId);
           const sendC = await sendOutboundTextMessage(ctx, handoffText);
           if (sendC.ok) {
             const nowH = new Date().toISOString();

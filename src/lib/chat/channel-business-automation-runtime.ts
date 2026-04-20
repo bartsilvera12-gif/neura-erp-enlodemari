@@ -196,7 +196,7 @@ export async function runWhatsappBusinessAutomationAfterInbound(params: {
 
   let ctx: Awaited<ReturnType<typeof resolveOutboundTextContextFromConversationId>>;
   try {
-    ctx = await resolveOutboundTextContextFromConversationId(supabase, conversationId);
+    ctx = await resolveOutboundTextContextFromConversationId(supabase, conversationId, empresaId);
   } catch {
     return { ...NO_AUTOMATION_SEND };
   }

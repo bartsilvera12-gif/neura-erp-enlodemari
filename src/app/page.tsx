@@ -973,7 +973,7 @@ function FinMontoGs({
       : `Gs. ${formatGs(monto)}`;
   return (
     <p
-      className={`${dense ? "mt-1" : "mt-3"} max-w-full overflow-hidden text-ellipsis font-bold tabular-nums tracking-tight whitespace-nowrap text-[clamp(0.8rem,2.4vw,1.65rem)] sm:text-[clamp(0.85rem,2.2vw,1.75rem)] ${className}`}
+      className={`${dense ? "mt-1" : "mt-3"} min-w-0 w-full max-w-full break-words whitespace-normal text-left font-bold tabular-nums leading-snug text-[clamp(0.8rem,2.4vw,1.65rem)] sm:text-[clamp(0.85rem,2.2vw,1.75rem)] ${className}`}
       title={texto}
     >
       {texto}
@@ -982,7 +982,7 @@ function FinMontoGs({
 }
 
 /**
- * Partición de la facturación emitida en el período (misma base que "A cobrar"):
+ * Partición del saldo pendiente por modalidad, facturas con emisión en el rango (Σ saldo por `tipo` factura):
  * - Contado: `tipo` factura = contado
  * - Mensual / suscripción: resto (p. ej. crédito / cuotas vinculadas a suscripción en el producto)
  * Cada factura del período entra en exactamente un bucket (sin doble conteo).
@@ -1033,8 +1033,24 @@ function DashFinanciero({
       const v = Number(x.monto);
       return acc + (Number.isFinite(v) ? v : 0);
     }, 0);
-  /** Saldo aún pendiente de cobro en el período (NC aprobada deja saldo 0 → no suma). */
-  const aCobrarPeriodo = sumSaldoPendiente(facturasPeriodo);
+  const sumMontoEmisionCohort = (arr: FacturaRaw[]) =>
+    arr.reduce((acc, x) => {
+      const v = Number(x.monto);
+      return acc + (Number.isFinite(v) ? v : 0);
+    }, 0);
+
+  /**
+   * Cohorte fiscal = facturas (fecha emisión en [desde,hasta], no anuladas; mismo filtro de período que abajo).
+   * • facturadoCohort: Σ monto = obligación de cobro al emitir.
+   * • carteraPendiente: Σ saldo = cartera viva aún a cobrar (misma unidad, ya netea NC/pagos a esas facturas en BD).
+   * • recaudadoCohort = facturado − cartera; cumple: facturado = recaudado + pendiente, % = recaudado / facturado.
+   *   No mezclar con “caja en el rango” (KPI Cobrado por día / registro de pagos), que puede afectar otras facturas.
+   */
+  const facturadoCohortPeriodo = sumMontoEmisionCohort(facturasPeriodo);
+  const carteraPendienteCohort = sumSaldoPendiente(facturasPeriodo);
+  const recaudadoCohortPeriodo = Math.max(0, facturadoCohortPeriodo - carteraPendienteCohort);
+  const pctCobranzaCohort =
+    facturadoCohortPeriodo > 0 ? (recaudadoCohortPeriodo / facturadoCohortPeriodo) * 100 : null;
 
   /** Suma de pagos registrados por factura (todas las fechas; para imputar contado sin filas en `pagos`). */
   const montoPagadoPorFacturaId = useMemo(() => {
@@ -1085,11 +1101,6 @@ function DashFinanciero({
     }
     return s;
   }, [facturasPeriodo, montoPagadoPorFacturaId]);
-
-  /** Cobranza reconocida en el período (pagos + contado implícito): base para pendiente y %. */
-  const cobranzaTotalPeriodo = cobradoRegistradoPeriodo + cobroImplicitoContadoPeriodo;
-  const pendientePeriodo = aCobrarPeriodo - cobranzaTotalPeriodo;
-  const pctCobranza = aCobrarPeriodo > 0 ? (cobranzaTotalPeriodo / aCobrarPeriodo) * 100 : null;
 
   /** Serie diaria solo con pagos registrados; días sin movimiento en 0 (continuidad del gráfico). */
   const cobradoPorDiaSerie = useMemo(() => {
@@ -1157,30 +1168,70 @@ function DashFinanciero({
     };
   }, [clientes, mapNombreTipoServicio]);
 
+  /**
+   * Deuda por `tipo_servicio_cliente` (catálogo): facturas de la coorte (emisión en rango) con saldo > 0
+   * saldo de factura (cartera viva), asignada al segmento del cliente; Sin clasificar si no hay.
+   */
+  const deudaPorTipoServicio = useMemo(() => {
+    const m = new Map<string, number>();
+    const byCliente = new Map<string, string>();
+    for (const c of clientes) {
+      const raw = (c.tipo_servicio_cliente ?? "").trim();
+      byCliente.set(String(c.id), raw ? raw.toLowerCase() : "__sin__");
+    }
+    for (const f of facturasPeriodo) {
+      if (esFacturaAnulada(f.estado)) continue;
+      const s = Number(f.saldo);
+      if (!Number.isFinite(s) || s <= 0) continue;
+      const slug = byCliente.get(String(f.cliente_id)) ?? "__sin__";
+      m.set(slug, (m.get(slug) ?? 0) + s);
+    }
+    const pal = ["#2563EB", "#3B82F6", "#60A5FA", "#22C55E", "#A78BFA", "#F59E0B", "#EC4899", "#38BDF8"];
+    const list = [...m.entries()]
+      .map(([k, v]) => ({
+        key: k,
+        value: v,
+        label: k === "__sin__" ? "Sin clasificar" : etiquetaVisibleTipoServicio(k, mapNombreTipoServicio),
+      }))
+      .sort((a, b) => b.value - a.value)
+      .map((row, i) => ({ ...row, color: pal[i % pal.length] }));
+    return {
+      list,
+      total: list.reduce((a, b) => a + b.value, 0),
+    };
+  }, [clientes, facturasPeriodo, mapNombreTipoServicio]);
+
+  const deudaMaxTipo = deudaPorTipoServicio.list.length
+    ? Math.max(...deudaPorTipoServicio.list.map((r) => r.value), 0)
+    : 1;
+
   const finCard =
-    "rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm shadow-slate-200/50 transition-shadow hover:shadow-md sm:p-7";
+    "min-w-0 overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm shadow-slate-200/50 transition-shadow hover:shadow-md sm:p-7";
   const finAccent = "#2563EB";
 
   return (
     <div className="space-y-6 rounded-2xl border border-slate-200/80 bg-gradient-to-b from-slate-50 to-white p-4 sm:space-y-8 sm:p-6 md:p-8">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 xl:gap-5">
         <motion.div whileHover={{ y: -2 }} className={finCard}>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">A cobrar del período</p>
-          <FinMontoGs monto={aCobrarPeriodo} />
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Facturado (del período)</p>
+          <p className="text-[10px] text-slate-400">Σ monto, emisiones en rango (sin anuladas)</p>
+          <FinMontoGs monto={facturadoCohortPeriodo} />
         </motion.div>
         <motion.div whileHover={{ y: -2 }} className={finCard}>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Cobrado del período</p>
-          <FinMontoGs monto={cobradoRegistradoPeriodo} className="text-[#2563EB]" />
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Cobrado (sobre el período)</p>
+          <p className="text-[10px] text-slate-400">Facturado − pendiente, misma coorte</p>
+          <FinMontoGs monto={recaudadoCohortPeriodo} className="text-[#2563EB]" />
         </motion.div>
         <motion.div whileHover={{ y: -2 }} className={finCard}>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Pendiente del período</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Pendiente (cartera)</p>
+          <p className="text-[10px] text-slate-400">Σ saldo, facturas con emisión en rango</p>
           <FinMontoGs
-            monto={pendientePeriodo}
-            negativo={pendientePeriodo < 0}
+            monto={carteraPendienteCohort}
+            negativo={carteraPendienteCohort < 0}
             className={
-              pendientePeriodo > 0
+              carteraPendienteCohort > 0
                 ? "text-amber-600"
-                : pendientePeriodo < 0
+                : carteraPendienteCohort < 0
                   ? "text-emerald-600"
                   : "text-slate-900"
             }
@@ -1188,8 +1239,9 @@ function DashFinanciero({
         </motion.div>
         <motion.div whileHover={{ y: -2 }} className={finCard}>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">% de cobranza</p>
-          <p className="mt-3 text-2xl font-bold tabular-nums tracking-tight text-slate-900 sm:text-3xl">
-            {pctCobranza == null ? "—" : `${pctCobranza.toFixed(1)}%`}
+          <p className="text-[10px] text-slate-400">Recaudado / facturado, coherente con los KPIs</p>
+          <p className="mt-2 text-2xl font-bold tabular-nums tracking-tight text-slate-900 sm:text-3xl break-words leading-snug">
+            {pctCobranzaCohort == null ? "—" : `${pctCobranzaCohort.toFixed(1)}%`}
           </p>
         </motion.div>
       </div>
@@ -1310,6 +1362,53 @@ function DashFinanciero({
         <p className="mt-3 text-[10px] leading-snug text-slate-400">
           Emisión en el período, sin anuladas · contado vs resto por tipo · sin pagos ni doble conteo.
         </p>
+      </div>
+
+      <div className={finCard}>
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Deuda por tipo de cliente</h3>
+        <p className="mt-1 text-[11px] text-slate-400">
+          Σ <span className="font-medium text-slate-500">saldo</span> de facturas emitidas en el rango, por{" "}
+          <span className="font-medium text-slate-500">clientes.tipo_servicio_cliente</span> (nombre desde catálogo
+          CRM).
+        </p>
+        {deudaPorTipoServicio.list.length === 0 ? (
+          <p className="mt-6 text-sm text-slate-500">No hay deuda pendiente (saldo &gt; 0) en el período o sin segmentos con saldo.</p>
+        ) : (
+          <div className="mt-6 space-y-4">
+            {deudaPorTipoServicio.list.map((row) => (
+              <div key={row.key}>
+                <div className="flex min-w-0 items-baseline justify-between gap-3 text-sm">
+                  <span className="min-w-0 break-words font-medium text-slate-700" title={row.label}>
+                    <span
+                      className="mr-2 inline-block h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: row.color }}
+                    />
+                    {row.label}
+                  </span>
+                  <span className="shrink-0 text-right text-sm font-bold tabular-nums text-slate-900">
+                    Gs. {formatGs(row.value)}
+                  </span>
+                </div>
+                <div className="mt-1.5 h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full min-w-0 rounded-full"
+                    style={{
+                      width: `${deudaMaxTipo > 0 ? (row.value / deudaMaxTipo) * 100 : 0}%`,
+                      backgroundColor: row.color,
+                    }}
+                    title={row.label}
+                  />
+                </div>
+              </div>
+            ))}
+            <div className="flex min-w-0 items-baseline justify-between gap-2 border-t border-slate-100 pt-4 text-sm">
+              <span className="font-semibold text-slate-600">Total deuda (vista)</span>
+              <span className="shrink-0 text-right text-base font-bold tabular-nums text-slate-900">
+                Gs. {formatGs(deudaPorTipoServicio.total)}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5 lg:gap-8">

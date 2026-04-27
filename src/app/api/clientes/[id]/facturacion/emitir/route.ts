@@ -5,6 +5,7 @@ import { API_ERRORS } from "@/lib/api/errors";
 import { emitEvent, EVENT_TYPES } from "@/lib/integrations/events";
 import { montosFacturaItemParaInsert } from "@/lib/facturacion/factura-item-montos";
 import { obtenerSiguienteNumeroFacturaEmpresa } from "@/lib/facturacion/factura-suscripcion-servidor";
+import { aplicarPlanPendienteSiVencido } from "@/lib/facturacion/suscripcion-plan-pendiente";
 import { fechaVencimientoSuscripcion } from "@/lib/fechas/calendario";
 
 
@@ -62,9 +63,22 @@ export async function POST(
       );
     }
 
+    await aplicarPlanPendienteSiVencido({
+      supabase,
+      empresaId: auth.empresa_id,
+      suscripcionId: suscripcion.id,
+    });
+    const { data: subAct } = await supabase
+      .from("suscripciones")
+      .select("*")
+      .eq("id", suscripcion.id)
+      .eq("empresa_id", auth.empresa_id)
+      .single();
+    const susUso = subAct ?? suscripcion;
+
     const [year, month] = mes.split("-").map(Number);
-    const diaFact = Math.min(suscripcion.dia_facturacion ?? 1, 28);
-    const diaVencCfg = Math.min(Math.max(1, suscripcion.dia_vencimiento ?? 10), 31);
+    const diaFact = Math.min(susUso.dia_facturacion ?? 1, 28);
+    const diaVencCfg = Math.min(Math.max(1, susUso.dia_vencimiento ?? 10), 31);
 
     const fecha = `${year}-${String(month).padStart(2, "0")}-${String(diaFact).padStart(2, "0")}`;
     const fechaVenc = fechaVencimientoSuscripcion(fecha, diaVencCfg);
@@ -77,7 +91,7 @@ export async function POST(
       .from("facturas")
       .select("id")
       .eq("cliente_id", clienteId)
-      .eq("suscripcion_id", suscripcion.id)
+      .eq("suscripcion_id", susUso.id)
       .eq("empresa_id", auth.empresa_id)
       .gte("fecha", `${mes}-01`)
       .lt("fecha", `${mesSiguiente}-01`)
@@ -91,15 +105,15 @@ export async function POST(
     }
 
     const numeroFactura = await obtenerSiguienteNumeroFacturaEmpresa(supabase, auth.empresa_id);
-    const monto = Number(suscripcion.precio);
-    const moneda = suscripcion.moneda === "USD" ? "USD" : "GS";
+    const monto = Number(susUso.precio);
+    const moneda = susUso.moneda === "USD" ? "USD" : "GS";
 
     const { data: factura, error: errFact } = await supabase
       .from("facturas")
       .insert({
         empresa_id: auth.empresa_id,
         cliente_id: clienteId,
-        suscripcion_id: suscripcion.id,
+        suscripcion_id: susUso.id,
         numero_factura: numeroFactura,
         fecha,
         fecha_vencimiento: fechaVenc,
@@ -117,11 +131,11 @@ export async function POST(
     }
 
     let planNombre = "Suscripción";
-    if (suscripcion.plan_id) {
+    if (susUso.plan_id) {
       const { data: plan } = await supabase
         .from("planes")
         .select("nombre")
-        .eq("id", suscripcion.plan_id)
+        .eq("id", susUso.plan_id)
         .maybeSingle();
       if (plan?.nombre) planNombre = plan.nombre;
     }

@@ -5,6 +5,7 @@ import type { AppSupabaseClient } from "@/lib/supabase/schema";
 import { montosFacturaItemParaInsert } from "./factura-item-montos";
 import { emitEvent, EVENT_TYPES } from "@/lib/integrations/events";
 import { fechaVencimientoSuscripcion, hoyYmdLocal } from "@/lib/fechas/calendario";
+import { aplicarPlanPendienteSiVencido } from "./suscripcion-plan-pendiente";
 
 export async function obtenerSiguienteNumeroFacturaEmpresa(
   supabase: AppSupabaseClient,
@@ -80,6 +81,28 @@ export async function crearFacturaInicialSuscripcionSiCorresponde(opts: {
   suscripcion: SuscripcionFacturaRow;
 }): Promise<void> {
   const { supabase, empresaId, suscripcion } = opts;
+  await aplicarPlanPendienteSiVencido({
+    supabase,
+    empresaId,
+    suscripcionId: suscripcion.id,
+  });
+  const { data: sRef } = await supabase
+    .from("suscripciones")
+    .select("id, plan_id, precio, moneda, dia_facturacion, dia_vencimiento, cliente_id")
+    .eq("id", suscripcion.id)
+    .eq("empresa_id", empresaId)
+    .maybeSingle();
+  const sRow = sRef
+    ? {
+        id: sRef.id as string,
+        cliente_id: (sRef as { cliente_id: string }).cliente_id,
+        plan_id: (sRef as { plan_id: string | null }).plan_id,
+        precio: Number((sRef as { precio: number }).precio),
+        moneda: (sRef as { moneda: string }).moneda,
+        dia_facturacion: (sRef as { dia_facturacion?: number | null }).dia_facturacion,
+        dia_vencimiento: (sRef as { dia_vencimiento?: number | null }).dia_vencimiento,
+      }
+    : suscripcion;
   const hoy = hoyYmdLocal();
   const y = new Date().getFullYear();
   const m = new Date().getMonth() + 1;
@@ -91,8 +114,8 @@ export async function crearFacturaInicialSuscripcionSiCorresponde(opts: {
   const { data: existentes } = await supabase
     .from("facturas")
     .select("id")
-    .eq("cliente_id", suscripcion.cliente_id)
-    .eq("suscripcion_id", suscripcion.id)
+    .eq("cliente_id", sRow.cliente_id)
+    .eq("suscripcion_id", sRow.id)
     .eq("empresa_id", empresaId)
     .gte("fecha", `${mesActual}-01`)
     .lt("fecha", `${mesSiguiente}-01`)
@@ -100,20 +123,20 @@ export async function crearFacturaInicialSuscripcionSiCorresponde(opts: {
 
   if (existentes && existentes.length > 0) return;
 
-  const monto = Number(suscripcion.precio);
+  const monto = Number(sRow.precio);
   if (!Number.isFinite(monto) || monto <= 0) return;
 
   const numeroFactura = await obtenerSiguienteNumeroFacturaEmpresa(supabase, empresaId);
-  const moneda = suscripcion.moneda === "USD" ? "USD" : "GS";
-  const diaVencCfg = Math.min(Math.max(1, Number(suscripcion.dia_vencimiento) || 10), 31);
+  const moneda = sRow.moneda === "USD" ? "USD" : "GS";
+  const diaVencCfg = Math.min(Math.max(1, Number(sRow.dia_vencimiento) || 10), 31);
   const fechaVenc = fechaVencimientoSuscripcion(hoy, diaVencCfg);
 
   const { data: factura, error: errFact } = await supabase
     .from("facturas")
     .insert({
       empresa_id: empresaId,
-      cliente_id: suscripcion.cliente_id,
-      suscripcion_id: suscripcion.id,
+      cliente_id: sRow.cliente_id,
+      suscripcion_id: sRow.id,
       numero_factura: numeroFactura,
       fecha: hoy,
       fecha_vencimiento: fechaVenc,
@@ -132,11 +155,11 @@ export async function crearFacturaInicialSuscripcionSiCorresponde(opts: {
   }
 
   let planNombre = "Suscripción";
-  if (suscripcion.plan_id) {
+  if (sRow.plan_id) {
     const { data: plan } = await supabase
       .from("planes")
       .select("nombre")
-      .eq("id", suscripcion.plan_id)
+      .eq("id", sRow.plan_id)
       .maybeSingle();
     if (plan?.nombre) planNombre = plan.nombre;
   }
@@ -167,7 +190,7 @@ export async function crearFacturaInicialSuscripcionSiCorresponde(opts: {
 
   await emitEvent(EVENT_TYPES.factura_creada, {
     factura_id: factura.id,
-    cliente_id: suscripcion.cliente_id,
+    cliente_id: sRow.cliente_id,
     monto: (factura as { monto: number }).monto,
   });
 }

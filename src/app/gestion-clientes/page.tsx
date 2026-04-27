@@ -13,6 +13,7 @@ import {
   Receipt,
   SlidersHorizontal,
 } from "lucide-react";
+import { ModalCambioPlanGestion } from "@/components/gestion-clientes/ModalCambioPlanGestion";
 import { RegistrarPagoModal } from "@/components/pagos/RegistrarPagoModal";
 import { SifenEstadoBadge } from "@/components/sifen/SifenEstadoBadge";
 import { useFacturaSifenEstados } from "@/hooks/useFacturaSifenEstados";
@@ -621,6 +622,7 @@ function GestionClientesPageInner() {
   const [selected,  setSelected]  = useState<Cliente | null>(null);
   const [facturas,  setFacturas]  = useState<Factura[]>([]);
   const [modalFacturacion, setModalFacturacion] = useState(false);
+  const [modalCambioPlan, setModalCambioPlan] = useState(false);
   const [facturaCobroModal, setFacturaCobroModal] = useState<Factura | null>(null);
   const [facturasDetalleAbierto, setFacturasDetalleAbierto] = useState(true);
   const [panelFiltrosFacturas, setPanelFiltrosFacturas] = useState(false);
@@ -965,7 +967,12 @@ function GestionClientesPageInner() {
                     onClick={() => setModalFacturacion(true)}
                   />
                   <BotonOperativo label="Servicios asociados" icon="🔗" />
-                  <BotonOperativo label="Cambio de plan" icon="🔄" />
+                  <BotonOperativo
+                    label="Cambio de plan"
+                    icon="🔄"
+                    activo
+                    onClick={() => setModalCambioPlan(true)}
+                  />
                   <BotonOperativo label="Cambio fecha venc." icon="📅" />
                   <BotonOperativo label="Historial cliente" icon="🕐" />
                 </div>
@@ -1184,6 +1191,19 @@ function GestionClientesPageInner() {
           clienteId={selected.id}
           clienteNombre={clienteNombre(selected)}
           onClose={() => setModalFacturacion(false)}
+        />
+      )}
+      {modalCambioPlan && selected && (
+        <ModalCambioPlanGestion
+          clienteId={selected.id}
+          clienteNombre={clienteNombre(selected)}
+          onClose={() => setModalCambioPlan(false)}
+          onExito={async () => {
+            if (selected) {
+              getFacturas(selected.id).then(setFacturas);
+              getClientes().then(setClientes);
+            }
+          }}
         />
       )}
       <RegistrarPagoModal

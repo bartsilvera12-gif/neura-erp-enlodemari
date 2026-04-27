@@ -10,6 +10,7 @@ export const EVENT_TYPES = {
   factura_creada: "factura_creada",
   pago_registrado: "pago_registrado",
   suscripcion_creada: "suscripcion_creada",
+  suscripcion_plan_cambiada: "suscripcion_plan_cambiada",
 } as const;
 
 export type EventType = (typeof EVENT_TYPES)[keyof typeof EVENT_TYPES];

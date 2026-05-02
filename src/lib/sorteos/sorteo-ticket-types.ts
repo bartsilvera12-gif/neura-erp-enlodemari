@@ -9,6 +9,12 @@ export type SorteoTicketImageConfig = {
   caption?: string;
   /** Pie legal / texto informativo */
   legalFooter?: string;
+  /** Último asset de logo subido (bucket + path en Storage) */
+  logo_storage_bucket?: string;
+  logo_storage_path?: string;
+  /** Último fondo subido (bucket + path en Storage) */
+  background_storage_bucket?: string;
+  background_storage_path?: string;
   primaryColor?: string;
   secondaryColor?: string;
   backgroundColor?: string;

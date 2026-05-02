@@ -13,6 +13,18 @@ export function sorteoTicketAssetBackgroundPath(empresaId: string, sorteoId: str
   return `${empresaId}/${sorteoId}/background.png`;
 }
 
+/** Posibles paths en Storage para logo (upload puede usar .png / .webp / .jpg). */
+export function sorteoTicketAssetLogoCandidates(empresaId: string, sorteoId: string): string[] {
+  const base = `${empresaId}/${sorteoId}`;
+  return [`${base}/logo.png`, `${base}/logo.webp`, `${base}/logo.jpg`];
+}
+
+/** Posibles paths en Storage para fondo del ticket. */
+export function sorteoTicketAssetBackgroundCandidates(empresaId: string, sorteoId: string): string[] {
+  const base = `${empresaId}/${sorteoId}`;
+  return [`${base}/background.png`, `${base}/background.webp`, `${base}/background.jpg`];
+}
+
 export function sorteoTicketGeneratedPath(
   empresaId: string,
   sorteoId: string,

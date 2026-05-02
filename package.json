@@ -42,7 +42,8 @@
     "db:apply-omnicanal-work-schedules": "tsx scripts/apply-omnicanal-work-schedules-migration.ts",
     "db:apply-stale-flow-session-pointers": "tsx scripts/apply-stale-flow-session-pointers-migration.ts",
     "verify:admin-catalog-nc": "tsx scripts/verify-admin-catalog-notas-credito.ts",
-    "db:apply-sql-file": "node scripts/apply-migration-file-pg.cjs"
+    "db:apply-sql-file": "node scripts/apply-migration-file-pg.cjs",
+    "qa:sorteo-ticket": "tsx ./scripts/qa-sorteo-ticket-delivery.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.9.0",

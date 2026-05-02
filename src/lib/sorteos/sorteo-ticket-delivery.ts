@@ -23,6 +23,7 @@ import {
   downloadAssetIfExists,
   ensureTicketBucketsExist,
   SORTEO_TICKET_ASSETS_BUCKET,
+  SORTEO_TICKET_GENERATED_BUCKET,
   sorteoTicketAssetBackgroundPath,
   sorteoTicketAssetLogoPath,
   sorteoTicketGeneratedPath,
@@ -116,12 +117,24 @@ export type MaybeGenerateAndSendSorteoTicketDeliveryInput = {
   skipWhatsApp?: boolean;
 };
 
+export type MaybeGenerateAndSendSorteoTicketDeliveryResult = {
+  ok: boolean;
+  skipped?: boolean;
+  reason?: string;
+  deliveryId?: string;
+  lastStatus?: "pending" | "generated" | "sent" | "error";
+  storageBucket?: string | null;
+  storagePath?: string | null;
+  whatsappMessageId?: string | null;
+  provider?: string | null;
+};
+
 /**
  * Genera PNG, sube a storage, envía por WhatsApp. Errores: no lanza; registra fila `error`.
  */
 export async function maybeGenerateAndSendSorteoTicketDelivery(
   input: MaybeGenerateAndSendSorteoTicketDeliveryInput
-): Promise<{ ok: boolean; skipped?: boolean; reason?: string }> {
+): Promise<MaybeGenerateAndSendSorteoTicketDeliveryResult> {
   const {
     supabase,
     empresaId,
@@ -134,6 +147,15 @@ export async function maybeGenerateAndSendSorteoTicketDelivery(
     trigger,
   } = input;
 
+  console.info("[sorteo-ticket] delivery_start", {
+    entradaId,
+    sorteoId,
+    trigger,
+    empresaId,
+    conversationId,
+    skipWhatsApp: Boolean(input.skipWhatsApp),
+  });
+
   const schema = await fetchDataSchemaForEmpresaId(empresaId);
   const db = supabase;
 
@@ -142,10 +164,17 @@ export async function maybeGenerateAndSendSorteoTicketDelivery(
     console.warn("[sorteo-ticket] sorteo_not_found", { sorteoId: String(sorteoId).slice(0, 8) });
     return { ok: true, skipped: true, reason: "sorteo_not_found" };
   }
+  console.info("[sorteo-ticket] mode_resolved", {
+    source: "delivery_fn",
+    entradaId,
+    raw_mode: sorteoRow.ticket_delivery_mode ?? null,
+    nombre_present: Boolean(sorteoRow.nombre?.trim()),
+  });
 
   const mode = sorteoRow.ticket_delivery_mode;
   const effectiveMode: SorteoTicketDeliveryMode = mode ?? "text_only";
   if (effectiveMode === "text_only") {
+    console.info("[sorteo-ticket] skipped_text_only", { entradaId, phase: "delivery_fn" });
     return { ok: true, skipped: true, reason: "text_only" };
   }
 
@@ -160,7 +189,18 @@ export async function maybeGenerateAndSendSorteoTicketDelivery(
     .limit(1);
   const current = (existList?.[0] ?? null) as DeliveryRow | null;
   if (current?.status === "sent") {
-    return { ok: true, skipped: true, reason: "already_sent" };
+    console.info("[sorteo-ticket] skipped_already_sent", {
+      entradaId,
+      deliveryId: current?.id,
+      status: current?.status,
+    });
+    return {
+      ok: true,
+      skipped: true,
+      reason: "already_sent",
+      deliveryId: current?.id,
+      lastStatus: "sent",
+    };
   }
 
   const { data: maxRows } = await db
@@ -223,6 +263,11 @@ export async function maybeGenerateAndSendSorteoTicketDelivery(
       return { ok: false, skipped: false, reason: "insert_failed" };
     }
     rowId = (ins.data as { id: string }).id;
+    console.info("[sorteo-ticket] delivery_saved", {
+      deliveryId: rowId,
+      status: "pending",
+      phase: "insert",
+    });
   } else if (current?.status === "error") {
     await db
       .from("sorteo_ticket_deliveries")
@@ -236,6 +281,8 @@ export async function maybeGenerateAndSendSorteoTicketDelivery(
 
   try {
     await ensureTicketBucketsExist(supabase);
+
+    console.info("[sorteo-ticket] render_start", { deliveryId: rowId, entradaId });
 
     const empresaNombre = await loadEmpresaNombre(empresaId);
     const logoPath = sorteoTicketAssetLogoPath(empresaId, sorteoId);
@@ -279,6 +326,12 @@ export async function maybeGenerateAndSendSorteoTicketDelivery(
       throw new Error(up.error);
     }
 
+    console.info("[sorteo-ticket] storage_uploaded", {
+      bucket: SORTEO_TICKET_GENERATED_BUCKET,
+      storage_path: genPath,
+      deliveryId: rowId,
+    });
+
     await db
       .from("sorteo_ticket_deliveries")
       .update({
@@ -291,14 +344,31 @@ export async function maybeGenerateAndSendSorteoTicketDelivery(
       })
       .eq("id", rowId);
 
+    console.info("[sorteo-ticket] delivery_saved", {
+      deliveryId: rowId,
+      status: "generated",
+      storage_path: genPath,
+    });
+
     if (input.skipWhatsApp) {
-      return { ok: true };
+      return {
+        ok: true,
+        deliveryId: rowId,
+        lastStatus: "generated",
+        storageBucket: "sorteo-tickets-generated",
+        storagePath: genPath,
+      };
     }
 
     const signed = await createSignedUrlForTicket(supabase, genPath, 600);
     if (!signed.url) {
       throw new Error(signed.error ?? "signed_url");
     }
+
+    console.info("[sorteo-ticket] signed_url_created", {
+      deliveryId: rowId,
+      hasUrl: true,
+    });
 
     let outbound: Awaited<ReturnType<typeof resolveOutboundTextContextFromIds>>;
     try {
@@ -315,6 +385,13 @@ export async function maybeGenerateAndSendSorteoTicketDelivery(
       (config.caption ?? "").trim() ||
       (config.title ?? "").trim() ||
       `Orden Nº ${orderResult.numeroOrden} — ${sorteoNombre}`.slice(0, 1024);
+
+    console.info("[sorteo-ticket] whatsapp_send_start", {
+      deliveryId: rowId,
+      provider: outbound.provider,
+      channelId: input.channelId,
+      contactId: input.contactId,
+    });
 
     let sendResult: { ok: boolean; waMessageId?: string | null; raw?: unknown; error?: string };
     if (outbound.provider === "ycloud") {
@@ -337,8 +414,19 @@ export async function maybeGenerateAndSendSorteoTicketDelivery(
     }
 
     if (!sendResult.ok) {
+      console.warn("[sorteo-ticket] whatsapp_send_error", {
+        deliveryId: rowId,
+        provider: outbound.provider,
+        error: sendResult.error ?? "send_failed",
+      });
       throw new Error(sendResult.error ?? "send_failed");
     }
+
+    console.info("[sorteo-ticket] whatsapp_send_ok", {
+      deliveryId: rowId,
+      whatsapp_message_id: sendResult.waMessageId ?? null,
+      provider: outbound.provider,
+    });
 
     const waId =
       typeof sendResult.waMessageId === "string" && sendResult.waMessageId
@@ -357,6 +445,13 @@ export async function maybeGenerateAndSendSorteoTicketDelivery(
       })
       .eq("id", rowId);
 
+    console.info("[sorteo-ticket] delivery_saved", {
+      deliveryId: rowId,
+      status: "sent",
+      whatsapp_message_id: waId,
+      provider: outbound.provider,
+    });
+
     if (conversationId?.trim()) {
       await persistOutgoingChatMessage(supabase, {
         conversation: { id: conversationId.trim(), empresa_id: empresaId },
@@ -369,22 +464,44 @@ export async function maybeGenerateAndSendSorteoTicketDelivery(
       });
     }
 
-    return { ok: true };
+    return {
+      ok: true,
+      deliveryId: rowId,
+      lastStatus: "sent",
+      storageBucket: "sorteo-tickets-generated",
+      storagePath: genPath,
+      whatsappMessageId: waId,
+      provider: outbound.provider,
+    };
   } catch (e) {
     const msg = safeErr(e);
     console.warn("[sorteo-ticket] delivery_failed", {
-      entradaId: String(entradaId).slice(0, 8),
-      reason: msg.slice(0, 120),
+      entradaId,
+      deliveryId: rowId || null,
+      reason: msg.slice(0, 200),
     });
-    await db
-      .from("sorteo_ticket_deliveries")
-      .update({
+    if (rowId) {
+      await db
+        .from("sorteo_ticket_deliveries")
+        .update({
+          status: "error",
+          error_message: msg,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", rowId);
+      console.warn("[sorteo-ticket] delivery_saved", {
+        deliveryId: rowId,
         status: "error",
-        error_message: msg,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", rowId);
-    return { ok: false, skipped: false, reason: msg };
+        error_message: msg.slice(0, 120),
+      });
+    }
+    return {
+      ok: false,
+      skipped: false,
+      reason: msg,
+      deliveryId: rowId || undefined,
+      lastStatus: rowId ? "error" : undefined,
+    };
   }
 }
 
@@ -407,6 +524,13 @@ export async function runSorteoTicketPreClose(params: {
   flowData: Record<string, string>;
   trigger: SorteoTicketTrigger;
 }): Promise<SorteoTicketPhaseResult> {
+  console.info("[sorteo-ticket] pre_close_enter", {
+    trigger: params.trigger,
+    conversationId: params.conversationId,
+    sorteoId: params.orderResult.sorteoId,
+    entradaId: params.orderResult.entradaId,
+  });
+
   const meta = await loadSorteoRowForTicket({
     supabase: params.supabase,
     empresaId: params.empresaId,
@@ -420,10 +544,24 @@ export async function runSorteoTicketPreClose(params: {
   }
   const effectiveMode: SorteoTicketDeliveryMode = meta.ticket_delivery_mode ?? "text_only";
 
+  console.info("[sorteo-ticket] mode_resolved", {
+    source: "pre_close",
+    effectiveMode,
+    raw_mode: meta.ticket_delivery_mode ?? null,
+    sorteoId: params.orderResult.sorteoId,
+  });
+
   if (effectiveMode === "text_only") {
+    console.info("[sorteo-ticket] skipped_text_only", {
+      phase: "pre_close",
+      entradaId: params.orderResult.entradaId,
+    });
     return { suppressPlainTextBody: false, needsPostFlowImage: false };
   }
   if (effectiveMode === "text_and_image") {
+    console.info("[sorteo-ticket] pre_close_defer_image_to_after_text", {
+      entradaId: params.orderResult.entradaId,
+    });
     return { suppressPlainTextBody: false, needsPostFlowImage: true };
   }
 
@@ -461,12 +599,30 @@ export async function runSorteoTicketAfterBuyerText(params: {
   flowData: Record<string, string>;
   trigger: SorteoTicketTrigger;
 }): Promise<void> {
+  console.info("[sorteo-ticket] after_buyer_text_enter", {
+    trigger: params.trigger,
+    conversationId: params.conversationId,
+    entradaId: params.orderResult.entradaId,
+    channelId: params.channelId,
+    contactId: params.contactId,
+  });
+
   const meta = await loadSorteoRowForTicket({
     supabase: params.supabase,
     empresaId: params.empresaId,
     sorteoId: params.orderResult.sorteoId,
   });
-  if ((meta?.ticket_delivery_mode ?? "text_only") !== "text_and_image") return;
+  const mode = meta?.ticket_delivery_mode ?? "text_only";
+  console.info("[sorteo-ticket] mode_resolved", {
+    source: "after_buyer_text",
+    effectiveMode: mode,
+    raw_mode: meta?.ticket_delivery_mode ?? null,
+  });
+
+  if (mode !== "text_and_image") {
+    console.info("[sorteo-ticket] after_buyer_text_skip", { mode, entradaId: params.orderResult.entradaId });
+    return;
+  }
 
   await maybeGenerateAndSendSorteoTicketDelivery({
     supabase: params.supabase,

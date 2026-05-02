@@ -2699,6 +2699,10 @@ export function createFlowEngine(ctx: FlowEngineContext) {
         }
       }
       if (!pipeline.advance) {
+        console.info("[sorteo-ticket] image_path_skipped_pipeline_not_advance", {
+          conversationId: state.id,
+          flow_session_id: imgFlowSid,
+        });
         return { ok: true, status: "comprobante_blocked_validation" };
       }
     }
@@ -2711,12 +2715,22 @@ export function createFlowEngine(ctx: FlowEngineContext) {
       flowData: Record<string, string>;
     } | null = null;
 
-    if (
+    const sorteoImgGateOk =
       pipeline.kind === "resolved" &&
-      pipeline.advance &&
-      state.flow_code?.trim() &&
-      imgFlowSid
-    ) {
+      (pipeline.kind === "resolved" ? pipeline.advance : false) &&
+      Boolean(state.flow_code?.trim()) &&
+      Boolean(imgFlowSid);
+    if (!sorteoImgGateOk) {
+      console.info("[sorteo-ticket] image_path_gate_skip", {
+        conversationId: state.id,
+        kindResolved: pipeline.kind === "resolved",
+        pipelineAdvance: pipeline.kind === "resolved" ? pipeline.advance : null,
+        hasFlowCode: Boolean(state.flow_code?.trim()),
+        hasFlowSessionId: Boolean(imgFlowSid),
+      });
+    }
+
+    if (sorteoImgGateOk) {
       const sendCtxOrd = await getConversationSendContext(state.id);
       const dataSchemaTag = await fetchDataSchemaForEmpresaId(state.empresa_id);
 

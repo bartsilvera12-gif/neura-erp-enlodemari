@@ -1,6 +1,8 @@
 /** Estados de sorteo (tabla sorteos) */
 export type SorteoEstado = "activo" | "pausado" | "cerrado" | "finalizado";
 
+export type SorteoTicketDeliveryMode = "text_only" | "text_and_image" | "image_only";
+
 /** Estados de conversación de sorteo */
 export type SorteoConversacionEstado =
   | "new_lead"
@@ -29,6 +31,8 @@ export interface Sorteo {
   estado: SorteoEstado;
   datos_bancarios: Record<string, unknown>;
   imagen_url: string | null;
+  ticket_delivery_mode?: SorteoTicketDeliveryMode;
+  ticket_image_config?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }

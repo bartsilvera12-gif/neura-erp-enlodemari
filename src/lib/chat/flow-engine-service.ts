@@ -33,8 +33,13 @@ import {
   prepareFlowDataForSorteoOrder,
   SORTEO_COMPROBANTE_MEDIA_ID_FIELD,
   SORTEO_COMPROBANTE_URL_FIELD,
+  type EnsureSorteoOrderCreatedData,
 } from "@/lib/sorteos/sorteo-order-from-chat";
 import { parseMoneyPy } from "@/lib/sorteos/parse-money-py";
+import {
+  runSorteoTicketAfterBuyerText,
+  runSorteoTicketPreClose,
+} from "@/lib/sorteos/sorteo-ticket-delivery";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 
 type ConversationFlowState = {
@@ -77,6 +82,8 @@ export type SendCurrentNodeParams = {
   __autoHop?: number;
   /** Se fusiona encima de chat_flow_data (útil tras crear orden sorteo sin esperar réplica). */
   mergeFlowVars?: Record<string, string>;
+  /** Sorteo image_only: ticket ya enviado; no reenviar el cuerpo largo del nodo (solo rama legacy sin bloques). */
+  suppressPlainTextBody?: boolean;
 };
 
 type FlowOption = {
@@ -1292,18 +1299,22 @@ export function createFlowEngine(ctx: FlowEngineContext) {
           automationSource: "flow_engine",
         });
       } else {
-        const send = await flowSendText(ctxSend, bodyText);
-        if (!send.ok) return { ok: false, error: send.error };
+        if (params.suppressPlainTextBody) {
+          /* sorteo image_only: ticket enviado antes del nodo; sin texto largo */
+        } else {
+          const send = await flowSendText(ctxSend, bodyText);
+          if (!send.ok) return { ok: false, error: send.error };
 
-        await persistOutgoingMessage({
-          conversation: state,
-          content: bodyText,
-          messageType: "text",
-          waMessageId: send.waMessageId,
-          raw: send.raw,
-          senderType: "system",
-          automationSource: "flow_engine",
-        });
+          await persistOutgoingMessage({
+            conversation: state,
+            content: bodyText,
+            messageType: "text",
+            waMessageId: send.waMessageId,
+            raw: send.raw,
+            senderType: "system",
+            automationSource: "flow_engine",
+          });
+        }
       }
 
       if (node.node_type === "human") {
@@ -1738,6 +1749,12 @@ export function createFlowEngine(ctx: FlowEngineContext) {
     }
 
     let sorteoOrderMerge: Record<string, string> | undefined;
+    let sorteoTicketPostAfterText = false;
+    let sorteoTicketSuppressPlain = false;
+    let sorteoTicketPackage: {
+      fin: EnsureSorteoOrderCreatedData;
+      flowData: Record<string, string>;
+    } | null = null;
     const wantsSorteoFinalize = isSorteoFinalizeClick;
 
     if (wantsSorteoFinalize) {
@@ -1851,6 +1868,27 @@ export function createFlowEngine(ctx: FlowEngineContext) {
           trigger: "confirmacion_final",
         },
       });
+      try {
+        const pre = await runSorteoTicketPreClose({
+          supabase,
+          empresaId: state.empresa_id,
+          conversationId: state.id,
+          contactId: state.contact_id,
+          channelId: state.channel_id,
+          flowSessionId: flowSidInteractive,
+          orderResult: fin,
+          flowData: hydFd,
+          trigger: "confirmacion_final",
+        });
+        sorteoTicketPostAfterText = pre.needsPostFlowImage;
+        sorteoTicketSuppressPlain = pre.suppressPlainTextBody;
+        sorteoTicketPackage = { fin, flowData: hydFd };
+      } catch (e) {
+        console.warn("[flow-engine] sorteo_ticket_pre_close", {
+          conversationId: state.id,
+          err: e instanceof Error ? e.message : String(e),
+        });
+      }
     }
 
     if (!selected.next_node_code) {
@@ -1881,6 +1919,26 @@ export function createFlowEngine(ctx: FlowEngineContext) {
             senderType: "system",
             automationSource: "flow_engine",
           });
+          if (sorteoTicketPackage) {
+            try {
+              await runSorteoTicketAfterBuyerText({
+                supabase,
+                empresaId: state.empresa_id,
+                conversationId: state.id,
+                contactId: state.contact_id,
+                channelId: state.channel_id,
+                flowSessionId: flowSidInteractive,
+                orderResult: sorteoTicketPackage.fin,
+                flowData: sorteoTicketPackage.flowData,
+                trigger: "confirmacion_final",
+              });
+            } catch (e) {
+              console.warn("[flow-engine] sorteo_ticket_after_summary", {
+                conversationId: state.id,
+                err: e instanceof Error ? e.message : String(e),
+              });
+            }
+          }
         }
       }
       return { ok: true, status: "no_next_node" };
@@ -1921,6 +1979,7 @@ export function createFlowEngine(ctx: FlowEngineContext) {
     const sent = await sendCurrentFlowNode({
       conversationId: state.id,
       ...(sorteoOrderMerge ? { mergeFlowVars: sorteoOrderMerge } : {}),
+      ...(sorteoTicketSuppressPlain ? { suppressPlainTextBody: true } : {}),
     });
     if (!sent.ok) {
       return { ok: false, status: "send_next_node_failed", error: sent.error };
@@ -1929,6 +1988,26 @@ export function createFlowEngine(ctx: FlowEngineContext) {
       conversationId: state.id,
       nodeCode: sent.nodeCode ?? selected.next_node_code,
     });
+    if (sorteoTicketPostAfterText && sorteoTicketPackage) {
+      try {
+        await runSorteoTicketAfterBuyerText({
+          supabase,
+          empresaId: state.empresa_id,
+          conversationId: state.id,
+          contactId: state.contact_id,
+          channelId: state.channel_id,
+          flowSessionId: flowSidInteractive,
+          orderResult: sorteoTicketPackage.fin,
+          flowData: sorteoTicketPackage.flowData,
+          trigger: "confirmacion_final",
+        });
+      } catch (e) {
+        console.warn("[flow-engine] sorteo_ticket_after_node", {
+          conversationId: state.id,
+          err: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
 
     return { ok: true, status: "advanced", nextNodeCode: selected.next_node_code };
   }
@@ -2509,6 +2588,12 @@ export function createFlowEngine(ctx: FlowEngineContext) {
     }
 
     let sorteoOrderMerge: Record<string, string> | undefined;
+    let sorteoImgTicketPostAfterText = false;
+    let sorteoImgTicketSuppressPlain = false;
+    let sorteoImgTicketPackage: {
+      fin: EnsureSorteoOrderCreatedData;
+      flowData: Record<string, string>;
+    } | null = null;
 
     if (
       pipeline.kind === "resolved" &&
@@ -2749,9 +2834,50 @@ export function createFlowEngine(ctx: FlowEngineContext) {
           trigger: "comprobante_imagen",
         },
       });
+      try {
+        const pre = await runSorteoTicketPreClose({
+          supabase,
+          empresaId: state.empresa_id,
+          conversationId: state.id,
+          contactId: state.contact_id,
+          channelId: channelIdFromConversation || state.channel_id,
+          flowSessionId: imgFlowSid,
+          orderResult: finImg,
+          flowData: hydFdImg,
+          trigger: "comprobante_imagen",
+        });
+        sorteoImgTicketPostAfterText = pre.needsPostFlowImage;
+        sorteoImgTicketSuppressPlain = pre.suppressPlainTextBody;
+        sorteoImgTicketPackage = { fin: finImg, flowData: hydFdImg };
+      } catch (e) {
+        console.warn("[flow-engine] sorteo_ticket_pre_close_image", {
+          conversationId: state.id,
+          err: e instanceof Error ? e.message : String(e),
+        });
+      }
     }
 
     if (!currentNode.next_node_code) {
+      if (sorteoImgTicketPackage) {
+        try {
+          await runSorteoTicketAfterBuyerText({
+            supabase,
+            empresaId: state.empresa_id,
+            conversationId: state.id,
+            contactId: state.contact_id,
+            channelId: channelIdFromConversation || state.channel_id,
+            flowSessionId: imgFlowSid,
+            orderResult: sorteoImgTicketPackage.fin,
+            flowData: sorteoImgTicketPackage.flowData,
+            trigger: "comprobante_imagen",
+          });
+        } catch (e) {
+          console.warn("[flow-engine] sorteo_ticket_after_image_no_next", {
+            conversationId: state.id,
+            err: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
       return { ok: true, status: "captured_no_next_node" };
     }
 
@@ -2786,9 +2912,30 @@ export function createFlowEngine(ctx: FlowEngineContext) {
         comprobante_recibido: "sí",
         ...(sorteoOrderMerge ?? {}),
       },
+      ...(sorteoImgTicketSuppressPlain ? { suppressPlainTextBody: true } : {}),
     });
     if (!sent.ok) {
       return { ok: false, status: "send_next_node_failed", error: sent.error };
+    }
+    if (sorteoImgTicketPostAfterText && sorteoImgTicketPackage) {
+      try {
+        await runSorteoTicketAfterBuyerText({
+          supabase,
+          empresaId: state.empresa_id,
+          conversationId: state.id,
+          contactId: state.contact_id,
+          channelId: channelIdFromConversation || state.channel_id,
+          flowSessionId: imgFlowSid,
+          orderResult: sorteoImgTicketPackage.fin,
+          flowData: sorteoImgTicketPackage.flowData,
+          trigger: "comprobante_imagen",
+        });
+      } catch (e) {
+        console.warn("[flow-engine] sorteo_ticket_after_image_node", {
+          conversationId: state.id,
+          err: e instanceof Error ? e.message : String(e),
+        });
+      }
     }
     return { ok: true, status: "advanced", nextNodeCode: currentNode.next_node_code };
   }

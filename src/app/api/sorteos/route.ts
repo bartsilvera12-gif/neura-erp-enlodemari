@@ -54,6 +54,8 @@ export type SorteoCreateBody = {
   estado?: string;
   datos_bancarios?: Record<string, unknown>;
   imagen_url?: string | null;
+  ticket_delivery_mode?: string;
+  ticket_image_config?: Record<string, unknown>;
 };
 
 /**
@@ -88,6 +90,15 @@ export async function POST(request: NextRequest) {
       estado: (body.estado as string)?.trim() || "activo",
       datos_bancarios: body.datos_bancarios && typeof body.datos_bancarios === "object" ? body.datos_bancarios : {},
       imagen_url: body.imagen_url?.trim() || null,
+      ticket_delivery_mode:
+        typeof body.ticket_delivery_mode === "string" &&
+        ["text_only", "text_and_image", "image_only"].includes(body.ticket_delivery_mode.trim())
+          ? body.ticket_delivery_mode.trim()
+          : "text_only",
+      ticket_image_config:
+        body.ticket_image_config && typeof body.ticket_image_config === "object"
+          ? body.ticket_image_config
+          : {},
     };
 
     const { data, error } = await sb.from("sorteos").insert(row).select("*").single();

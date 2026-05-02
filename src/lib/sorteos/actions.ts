@@ -25,6 +25,11 @@ function mapSorteo(r: Record<string, unknown>): Sorteo {
       ? (r.datos_bancarios as Record<string, unknown>)
       : {}) as Record<string, unknown>,
     imagen_url: (r.imagen_url as string) ?? null,
+    ticket_delivery_mode: (r.ticket_delivery_mode as Sorteo["ticket_delivery_mode"]) ?? "text_only",
+    ticket_image_config:
+      typeof r.ticket_image_config === "object" && r.ticket_image_config !== null
+        ? (r.ticket_image_config as Record<string, unknown>)
+        : {},
     created_at: (r.created_at as string) ?? "",
     updated_at: (r.updated_at as string) ?? "",
   };
@@ -64,6 +69,8 @@ export type SorteoInput = {
   estado: SorteoEstado;
   datos_bancarios: Record<string, unknown>;
   imagen_url?: string | null;
+  ticket_delivery_mode?: Sorteo["ticket_delivery_mode"];
+  ticket_image_config?: Record<string, unknown>;
 };
 
 export async function createSorteo(input: SorteoInput): Promise<Sorteo> {
@@ -79,6 +86,8 @@ export async function createSorteo(input: SorteoInput): Promise<Sorteo> {
       estado: input.estado,
       datos_bancarios: input.datos_bancarios,
       imagen_url: input.imagen_url?.trim() || null,
+      ticket_delivery_mode: input.ticket_delivery_mode ?? "text_only",
+      ticket_image_config: input.ticket_image_config ?? {},
     }),
   });
   const json = (await res.json()) as { success?: boolean; data?: Record<string, unknown>; error?: string };
@@ -102,6 +111,8 @@ export async function updateSorteo(id: string, input: SorteoInput): Promise<Sort
       estado: input.estado,
       datos_bancarios: input.datos_bancarios,
       imagen_url: input.imagen_url?.trim() || null,
+      ticket_delivery_mode: input.ticket_delivery_mode ?? "text_only",
+      ticket_image_config: input.ticket_image_config ?? {},
     }),
   });
   const json = (await res.json()) as { success?: boolean; data?: Record<string, unknown>; error?: string };

@@ -89,6 +89,15 @@ export async function PATCH(
           ? body.imagen_url.trim()
           : null;
     }
+    if (typeof body.ticket_delivery_mode === "string") {
+      const m = body.ticket_delivery_mode.trim();
+      if (["text_only", "text_and_image", "image_only"].includes(m)) {
+        patch.ticket_delivery_mode = m;
+      }
+    }
+    if (body.ticket_image_config !== undefined && typeof body.ticket_image_config === "object") {
+      patch.ticket_image_config = body.ticket_image_config;
+    }
 
     const sb = await getChatServiceClientForEmpresa(empresaId);
     const { data, error } = await sb

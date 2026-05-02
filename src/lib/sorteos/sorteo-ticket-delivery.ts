@@ -1,0 +1,567 @@
+import "server-only";
+
+import {
+  createServiceRoleClientForEmpresa,
+  fetchDataSchemaForEmpresaId,
+} from "@/lib/supabase/empresa-data-schema";
+import type { AppSupabaseClient } from "@/lib/supabase/schema";
+import { persistOutgoingChatMessage } from "@/lib/chat/outgoing-message-persist";
+import { resolveOutboundTextContextFromIds } from "@/lib/chat/outbound-send-dispatch";
+import { sendWhatsAppImage } from "@/lib/chat/whatsapp-send-service";
+import { sendYCloudWhatsappMediaViaLink } from "@/lib/chat/ycloud-send-service";
+import {
+  parseSorteoParticipantFromFlowData,
+  type EnsureSorteoOrderCreatedData,
+} from "@/lib/sorteos/sorteo-order-from-chat";
+import {
+  normalizeTicketImageConfig,
+  SORTEO_TICKET_DEFAULT_STUB,
+  type SorteoTicketDeliveryMode,
+} from "@/lib/sorteos/sorteo-ticket-types";
+import { buildSorteoTicketSvg, renderSorteoTicketPng, type SorteoTicketRenderInput } from "@/lib/sorteos/sorteo-ticket-render";
+import {
+  createSignedUrlForTicket,
+  downloadAssetIfExists,
+  ensureTicketBucketsExist,
+  SORTEO_TICKET_ASSETS_BUCKET,
+  sorteoTicketAssetBackgroundPath,
+  sorteoTicketAssetLogoPath,
+  sorteoTicketGeneratedPath,
+  uploadGeneratedTicketPng,
+} from "@/lib/sorteos/sorteo-ticket-storage";
+
+export type SorteoTicketTrigger = "confirmacion_final" | "comprobante_imagen";
+
+type DeliveryRow = {
+  id: string;
+  status: string;
+  template_revision: number;
+  is_current: boolean;
+};
+
+function safeErr(e: unknown): string {
+  if (e instanceof Error) {
+    const m = e.message;
+    if (/key|token|password|secret|bearer|api-?key/i.test(m)) return "error_interno";
+    return m.slice(0, 500);
+  }
+  return "error_desconocido";
+}
+
+async function loadEmpresaNombre(
+  supabase: AppSupabaseClient,
+  empresaId: string
+): Promise<string> {
+  const { data } = await supabase
+    .from("empresas")
+    .select("nombre")
+    .eq("id", empresaId)
+    .maybeSingle();
+  const n = (data as { nombre?: string } | null)?.nombre;
+  return (typeof n === "string" && n.trim() ? n.trim() : "Empresa");
+}
+
+export type MaybeGenerateAndSendSorteoTicketDeliveryInput = {
+  supabase: AppSupabaseClient;
+  empresaId: string;
+  sorteoId: string;
+  entradaId: string;
+  conversationId: string | null;
+  flowSessionId: string | null;
+  contactId: string;
+  channelId: string;
+  orderResult: EnsureSorteoOrderCreatedData;
+  flowData: Record<string, string>;
+  trigger: SorteoTicketTrigger;
+  /** Solo generar PNG + storage; sin WhatsApp (p. ej. regenerar diseño desde panel). */
+  skipWhatsApp?: boolean;
+};
+
+/**
+ * Genera PNG, sube a storage, envía por WhatsApp. Errores: no lanza; registra fila `error`.
+ */
+export async function maybeGenerateAndSendSorteoTicketDelivery(
+  input: MaybeGenerateAndSendSorteoTicketDeliveryInput
+): Promise<{ ok: boolean; skipped?: boolean; reason?: string }> {
+  const {
+    supabase,
+    empresaId,
+    sorteoId,
+    entradaId,
+    conversationId,
+    flowSessionId,
+    orderResult,
+    flowData,
+    trigger,
+  } = input;
+
+  const schema = await fetchDataSchemaForEmpresaId(empresaId);
+  const sb = await createServiceRoleClientForEmpresa(empresaId);
+
+  const { data: sorteoRow, error: se } = await sb
+    .from("sorteos")
+    .select("id, nombre, ticket_delivery_mode, ticket_image_config")
+    .eq("id", sorteoId)
+    .maybeSingle();
+  if (se || !sorteoRow) {
+    console.warn("[sorteo-ticket] sorteo_not_found", { sorteoId: String(sorteoId).slice(0, 8) });
+    return { ok: true, skipped: true, reason: "sorteo_not_found" };
+  }
+
+  const mode = (sorteoRow as { ticket_delivery_mode?: string }).ticket_delivery_mode as
+    | SorteoTicketDeliveryMode
+    | undefined;
+  const effectiveMode: SorteoTicketDeliveryMode = mode ?? "text_only";
+  if (effectiveMode === "text_only") {
+    return { ok: true, skipped: true, reason: "text_only" };
+  }
+
+  const config = normalizeTicketImageConfig(
+    (sorteoRow as { ticket_image_config?: unknown }).ticket_image_config
+  );
+  const sorteoNombre = String((sorteoRow as { nombre?: string }).nombre ?? "").trim() || "Sorteo";
+
+  const { data: existList } = await sb
+    .from("sorteo_ticket_deliveries")
+    .select("id, status, template_revision, is_current")
+    .eq("entrada_id", entradaId)
+    .eq("is_current", true)
+    .limit(1);
+  const current = (existList?.[0] ?? null) as DeliveryRow | null;
+  if (current?.status === "sent") {
+    return { ok: true, skipped: true, reason: "already_sent" };
+  }
+
+  const { data: maxRows } = await sb
+    .from("sorteo_ticket_deliveries")
+    .select("template_revision")
+    .eq("entrada_id", entradaId)
+    .order("template_revision", { ascending: false })
+    .limit(1);
+  const maxRev = Number((maxRows?.[0] as { template_revision?: number } | undefined)?.template_revision ?? 0) || 0;
+
+  const templateRevision = current ? current.template_revision : maxRev + 1;
+  const deliveryId = current?.id;
+
+  const payloadSnapshot = {
+    trigger,
+    idempotent: orderResult.idempotent,
+    cupones: orderResult.cupones.map((c) => c.numero_cupon),
+    sorteo_nombre: orderResult.sorteoNombre,
+  };
+
+  const participant = parseSorteoParticipantFromFlowData(flowData);
+  const cuponNumbers = orderResult.cupones.map((c) => c.numero_cupon).filter(Boolean);
+  const telefono = (flowData["celular"] ?? flowData["telefono"] ?? "").trim();
+  const clienteNombre =
+    participant?.nombre_completo ||
+    (flowData["nombre_completo"] ?? flowData["nombre"] ?? "").trim() ||
+    "";
+  const documento =
+    participant?.cedula ||
+    (flowData["documento"] ?? flowData["cedula"] ?? flowData["ci"] ?? "").trim() ||
+    "";
+
+  let rowId = deliveryId ?? "";
+  if (!rowId) {
+    const ins = await sb
+      .from("sorteo_ticket_deliveries")
+      .insert({
+        empresa_id: empresaId,
+        sorteo_id: sorteoId,
+        entrada_id: entradaId,
+        conversation_id: conversationId?.trim() || null,
+        flow_session_id:
+          flowSessionId && /^[0-9a-f-]{36}$/i.test(flowSessionId.trim()) ? flowSessionId.trim() : null,
+        delivery_mode: effectiveMode,
+        status: "pending",
+        cliente_nombre: clienteNombre || null,
+        cliente_documento: documento || null,
+        telefono: telefono || null,
+        numero_orden: String(orderResult.numeroOrden),
+        cupones: orderResult.cupones.map((c) => ({ id: c.id, numero_cupon: c.numero_cupon })),
+        payload_snapshot: payloadSnapshot,
+        config_snapshot: config as Record<string, unknown>,
+        template_revision: templateRevision,
+        is_current: true,
+      })
+      .select("id")
+      .maybeSingle();
+    if (ins.error || !ins.data) {
+      console.warn("[sorteo-ticket] insert_pending_failed", { message: ins.error?.message });
+      return { ok: false, skipped: false, reason: "insert_failed" };
+    }
+    rowId = (ins.data as { id: string }).id;
+  } else if (current?.status === "error") {
+    await sb
+      .from("sorteo_ticket_deliveries")
+      .update({
+        status: "pending",
+        error_message: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", rowId);
+  }
+
+  try {
+    await ensureTicketBucketsExist(sb);
+
+    const empresaNombre = await loadEmpresaNombre(sb, empresaId);
+    const logoPath = sorteoTicketAssetLogoPath(empresaId, sorteoId);
+    const bgPath = sorteoTicketAssetBackgroundPath(empresaId, sorteoId);
+    let logoDl = await downloadAssetIfExists(sb, SORTEO_TICKET_ASSETS_BUCKET, logoPath);
+    if (!logoDl) {
+      logoDl = await downloadAssetIfExists(sb, SORTEO_TICKET_ASSETS_BUCKET, `${empresaId}/${sorteoId}/logo.webp`);
+    }
+    const bgDl = await downloadAssetIfExists(sb, SORTEO_TICKET_ASSETS_BUCKET, bgPath);
+
+    const fechaHora = new Date().toLocaleString("es-PY", {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+
+    const renderInput: SorteoTicketRenderInput = {
+      empresaNombre,
+      sorteoNombre: orderResult.sorteoNombre || sorteoNombre,
+      clienteNombre: clienteNombre || undefined,
+      documento: documento || undefined,
+      telefono: telefono || undefined,
+      numeroOrden: String(orderResult.numeroOrden),
+      cupones: cuponNumbers,
+      fechaHora,
+      config,
+      logoBytes: logoDl?.bytes ?? null,
+      logoMime: logoDl?.mime ?? null,
+      backgroundBytes: bgDl?.bytes ?? null,
+      backgroundMime: bgDl?.mime ?? null,
+    };
+
+    const svg = buildSorteoTicketSvg(renderInput);
+    const { png, hash } = await renderSorteoTicketPng(svg);
+    const genPath = sorteoTicketGeneratedPath(empresaId, sorteoId, entradaId, templateRevision);
+    const up = await uploadGeneratedTicketPng(sb, genPath, png);
+    if (up.error) {
+      throw new Error(up.error);
+    }
+
+    await sb
+      .from("sorteo_ticket_deliveries")
+      .update({
+        status: "generated",
+        storage_bucket: "sorteo-tickets-generated",
+        storage_path: genPath,
+        png_bytes_hash: hash,
+        generated_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", rowId);
+
+    if (input.skipWhatsApp) {
+      return { ok: true };
+    }
+
+    const signed = await createSignedUrlForTicket(sb, genPath, 600);
+    if (!signed.url) {
+      throw new Error(signed.error ?? "signed_url");
+    }
+
+    let outbound: Awaited<ReturnType<typeof resolveOutboundTextContextFromIds>>;
+    try {
+      outbound = await resolveOutboundTextContextFromIds(
+        supabase,
+        { contactId: input.contactId, channelId: input.channelId },
+        { dataSchema: schema, empresaId }
+      );
+    } catch (e) {
+      throw new Error(safeErr(e));
+    }
+
+    const caption =
+      (config.caption ?? "").trim() ||
+      (config.title ?? "").trim() ||
+      `Orden Nº ${orderResult.numeroOrden} — ${sorteoNombre}`.slice(0, 1024);
+
+    let sendResult: { ok: boolean; waMessageId?: string | null; raw?: unknown; error?: string };
+    if (outbound.provider === "ycloud") {
+      sendResult = await sendYCloudWhatsappMediaViaLink({
+        apiKey: outbound.apiKey,
+        fromE164: outbound.fromE164,
+        toDigits: outbound.toDigits,
+        kind: "image",
+        mediaLink: signed.url,
+        caption,
+      });
+    } else {
+      sendResult = await sendWhatsAppImage({
+        toDigits: outbound.toDigits,
+        phoneNumberId: outbound.phoneNumberId,
+        accessToken: outbound.accessToken,
+        imageUrl: signed.url,
+        caption,
+      });
+    }
+
+    if (!sendResult.ok) {
+      throw new Error(sendResult.error ?? "send_failed");
+    }
+
+    const waId =
+      typeof sendResult.waMessageId === "string" && sendResult.waMessageId
+        ? sendResult.waMessageId
+        : null;
+
+    await sb
+      .from("sorteo_ticket_deliveries")
+      .update({
+        status: "sent",
+        whatsapp_message_id: waId,
+        provider: outbound.provider,
+        channel_id: input.channelId,
+        sent_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", rowId);
+
+    if (conversationId?.trim()) {
+      await persistOutgoingChatMessage(supabase, {
+        conversation: { id: conversationId.trim(), empresa_id: empresaId },
+        content: caption ? `Ticket imagen\n${caption}` : "Ticket imagen enviado",
+        messageType: "image",
+        waMessageId: waId,
+        raw: sendResult.raw ?? {},
+        senderType: "system",
+        automationSource: "sorteo_ticket",
+      });
+    }
+
+    return { ok: true };
+  } catch (e) {
+    const msg = safeErr(e);
+    console.warn("[sorteo-ticket] delivery_failed", {
+      entradaId: String(entradaId).slice(0, 8),
+      reason: msg.slice(0, 120),
+    });
+    await sb
+      .from("sorteo_ticket_deliveries")
+      .update({
+        status: "error",
+        error_message: msg,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", rowId);
+    return { ok: false, skipped: false, reason: msg };
+  }
+}
+
+export type SorteoTicketPhaseResult = {
+  suppressPlainTextBody: boolean;
+  needsPostFlowImage: boolean;
+};
+
+/**
+ * Antes del mensaje de cierre del flujo: image_only intenta ticket; text_and_image difiere imagen.
+ */
+export async function runSorteoTicketPreClose(params: {
+  supabase: AppSupabaseClient;
+  empresaId: string;
+  conversationId: string;
+  contactId: string;
+  channelId: string;
+  flowSessionId: string | null;
+  orderResult: EnsureSorteoOrderCreatedData;
+  flowData: Record<string, string>;
+  trigger: SorteoTicketTrigger;
+}): Promise<SorteoTicketPhaseResult> {
+  const sb = await createServiceRoleClientForEmpresa(params.empresaId);
+  const { data: sorteoRow } = await sb
+    .from("sorteos")
+    .select("ticket_delivery_mode")
+    .eq("id", params.orderResult.sorteoId)
+    .maybeSingle();
+  const mode = (sorteoRow as { ticket_delivery_mode?: string } | null)?.ticket_delivery_mode as
+    | SorteoTicketDeliveryMode
+    | undefined;
+  const effectiveMode: SorteoTicketDeliveryMode = mode ?? "text_only";
+
+  if (effectiveMode === "text_only") {
+    return { suppressPlainTextBody: false, needsPostFlowImage: false };
+  }
+  if (effectiveMode === "text_and_image") {
+    return { suppressPlainTextBody: false, needsPostFlowImage: true };
+  }
+
+  const r = await maybeGenerateAndSendSorteoTicketDelivery({
+    supabase: params.supabase,
+    empresaId: params.empresaId,
+    sorteoId: params.orderResult.sorteoId,
+    entradaId: params.orderResult.entradaId,
+    conversationId: params.conversationId,
+    flowSessionId: params.flowSessionId,
+    contactId: params.contactId,
+    channelId: params.channelId,
+    orderResult: params.orderResult,
+    flowData: params.flowData,
+    trigger: params.trigger,
+  });
+
+  const suppress =
+    effectiveMode === "image_only" &&
+    (r.ok || (Boolean(r.skipped) && r.reason === "already_sent"));
+  return {
+    suppressPlainTextBody: suppress,
+    needsPostFlowImage: false,
+  };
+}
+
+export async function runSorteoTicketAfterBuyerText(params: {
+  supabase: AppSupabaseClient;
+  empresaId: string;
+  conversationId: string;
+  contactId: string;
+  channelId: string;
+  flowSessionId: string | null;
+  orderResult: EnsureSorteoOrderCreatedData;
+  flowData: Record<string, string>;
+  trigger: SorteoTicketTrigger;
+}): Promise<void> {
+  const sb = await createServiceRoleClientForEmpresa(params.empresaId);
+  const { data: sorteoRow } = await sb
+    .from("sorteos")
+    .select("ticket_delivery_mode")
+    .eq("id", params.orderResult.sorteoId)
+    .maybeSingle();
+  const mode = (sorteoRow as { ticket_delivery_mode?: string } | null)?.ticket_delivery_mode as
+    | SorteoTicketDeliveryMode
+    | undefined;
+  if ((mode ?? "text_only") !== "text_and_image") return;
+
+  await maybeGenerateAndSendSorteoTicketDelivery({
+    supabase: params.supabase,
+    empresaId: params.empresaId,
+    sorteoId: params.orderResult.sorteoId,
+    entradaId: params.orderResult.entradaId,
+    conversationId: params.conversationId,
+    flowSessionId: params.flowSessionId,
+    contactId: params.contactId,
+    channelId: params.channelId,
+    orderResult: params.orderResult,
+    flowData: params.flowData,
+    trigger: params.trigger,
+  });
+}
+
+export function buildImageOnlyStubText(config: Record<string, unknown>): string {
+  const c = normalizeTicketImageConfig(config);
+  return (c.ticket_image_only_stub ?? "").trim() || SORTEO_TICKET_DEFAULT_STUB;
+}
+
+/**
+ * Reenvía por WhatsApp un ticket ya generado (misma fila, nuevo envío; no duplica orden).
+ */
+export async function resendSorteoTicketByDeliveryId(input: {
+  supabase: AppSupabaseClient;
+  empresaId: string;
+  deliveryId: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const schema = await fetchDataSchemaForEmpresaId(input.empresaId);
+  const sb = await createServiceRoleClientForEmpresa(input.empresaId);
+
+  const { data: row, error: r0 } = await sb
+    .from("sorteo_ticket_deliveries")
+    .select(
+      "id, entrada_id, sorteo_id, conversation_id, channel_id, storage_path, empresa_id, numero_orden, payload_snapshot"
+    )
+    .eq("id", input.deliveryId)
+    .eq("empresa_id", input.empresaId)
+    .maybeSingle();
+  if (r0 || !row) return { ok: false, error: "not_found" };
+
+  const storagePath = (row as { storage_path?: string | null }).storage_path?.trim();
+  if (!storagePath) return { ok: false, error: "no_file" };
+
+  const convId = (row as { conversation_id?: string | null }).conversation_id;
+  const channelId = (row as { channel_id?: string | null }).channel_id;
+  if (!convId || !channelId) return { ok: false, error: "no_conversation" };
+
+  const { data: conv } = await sb
+    .from("chat_conversations")
+    .select("contact_id")
+    .eq("id", convId)
+    .maybeSingle();
+  const contactId = (conv as { contact_id?: string } | null)?.contact_id;
+  if (!contactId) return { ok: false, error: "no_contact" };
+
+  const sorteoId = (row as { sorteo_id: string }).sorteo_id;
+  const { data: sr } = await sb.from("sorteos").select("nombre, ticket_image_config").eq("id", sorteoId).maybeSingle();
+  const cfg = normalizeTicketImageConfig((sr as { ticket_image_config?: unknown } | null)?.ticket_image_config);
+  const sorteoNombre = String((sr as { nombre?: string } | null)?.nombre ?? "").trim();
+
+  const signed = await createSignedUrlForTicket(sb, storagePath, 600);
+  if (!signed.url) return { ok: false, error: signed.error ?? "signed_url" };
+
+  let outbound: Awaited<ReturnType<typeof resolveOutboundTextContextFromIds>>;
+  try {
+    outbound = await resolveOutboundTextContextFromIds(
+      input.supabase,
+      { contactId, channelId },
+      { dataSchema: schema, empresaId: input.empresaId }
+    );
+  } catch {
+    return { ok: false, error: "outbound" };
+  }
+
+  const numOrden = String((row as { numero_orden?: string | null }).numero_orden ?? "");
+  const caption =
+    (cfg.caption ?? "").trim() ||
+    (cfg.title ?? "").trim() ||
+    `Orden Nº ${numOrden} — ${sorteoNombre}`.slice(0, 1024);
+
+  let sendResult: { ok: boolean; waMessageId?: string | null; raw?: unknown; error?: string };
+  if (outbound.provider === "ycloud") {
+    sendResult = await sendYCloudWhatsappMediaViaLink({
+      apiKey: outbound.apiKey,
+      fromE164: outbound.fromE164,
+      toDigits: outbound.toDigits,
+      kind: "image",
+      mediaLink: signed.url,
+      caption,
+    });
+  } else {
+    sendResult = await sendWhatsAppImage({
+      toDigits: outbound.toDigits,
+      phoneNumberId: outbound.phoneNumberId,
+      accessToken: outbound.accessToken,
+      imageUrl: signed.url,
+      caption,
+    });
+  }
+
+  if (!sendResult.ok) return { ok: false, error: sendResult.error ?? "send_failed" };
+
+  const waId =
+    typeof sendResult.waMessageId === "string" && sendResult.waMessageId
+      ? sendResult.waMessageId
+      : null;
+
+  await sb
+    .from("sorteo_ticket_deliveries")
+    .update({
+      whatsapp_message_id: waId,
+      provider: outbound.provider,
+      sent_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.deliveryId);
+
+  await persistOutgoingChatMessage(input.supabase, {
+    conversation: { id: convId, empresa_id: input.empresaId },
+    content: caption ? `Ticket imagen (reenvío)\n${caption}` : "Ticket imagen reenviado",
+    messageType: "image",
+    waMessageId: waId,
+    raw: sendResult.raw ?? {},
+    senderType: "system",
+    automationSource: "sorteo_ticket_resend",
+  });
+
+  return { ok: true };
+}

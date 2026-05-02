@@ -148,7 +148,14 @@ const MENU_STRUCTURE: MenuItem[] = [
   { key: "gestion-clientes", slug: "gestion-clientes", label: "Gestión Clientes", href: "/gestion-clientes", icon: Users },
   { key: "crm", slug: "crm", label: "CRM Funnel", href: "/crm", icon: Sparkles },
   { key: "marketing", slug: "marketing", label: "Marketing Ops", href: "/marketing", icon: Megaphone },
-  { key: "sorteos", slug: "sorteos", label: "Sorteos", href: "/sorteos", icon: Ticket },
+  {
+    key: "sorteos",
+    slug: "sorteos",
+    label: "Sorteos",
+    href: "/sorteos",
+    icon: Ticket,
+    children: [{ label: "Tickets / Comprobantes", href: "/sorteos/tickets", exactMatch: true }],
+  },
 ];
 
 function modulosSyntheticFromMenu(): ModuloEmpresa[] {

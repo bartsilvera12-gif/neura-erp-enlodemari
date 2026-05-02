@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getSorteoById, updateSorteo } from "@/lib/sorteos/actions";
-import type { SorteoEstado } from "@/lib/sorteos/types";
+import type { SorteoEstado, SorteoTicketDeliveryMode } from "@/lib/sorteos/types";
+import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 
 export default function EditarSorteoPage() {
   const params = useParams();
@@ -22,6 +23,11 @@ export default function EditarSorteoPage() {
   const [estado, setEstado] = useState<SorteoEstado>("activo");
   const [imagenUrl, setImagenUrl] = useState("");
   const [datosBancarios, setDatosBancarios] = useState("{}");
+  const [ticketDeliveryMode, setTicketDeliveryMode] = useState<SorteoTicketDeliveryMode>("text_only");
+  const [ticketCaption, setTicketCaption] = useState("");
+  const [ticketTitle, setTicketTitle] = useState("");
+  const [ticketLegal, setTicketLegal] = useState("");
+  const [ticketStub, setTicketStub] = useState("");
 
   useEffect(() => {
     if (!id) return;
@@ -45,6 +51,12 @@ export default function EditarSorteoPage() {
         setEstado(s.estado);
         setImagenUrl(s.imagen_url ?? "");
         setDatosBancarios(JSON.stringify(s.datos_bancarios ?? {}, null, 2));
+        setTicketDeliveryMode((s.ticket_delivery_mode as SorteoTicketDeliveryMode) ?? "text_only");
+        const tic = (s.ticket_image_config ?? {}) as Record<string, unknown>;
+        setTicketTitle(typeof tic.title === "string" ? tic.title : "");
+        setTicketCaption(typeof tic.caption === "string" ? tic.caption : "");
+        setTicketLegal(typeof tic.legalFooter === "string" ? tic.legalFooter : "");
+        setTicketStub(typeof tic.ticket_image_only_stub === "string" ? tic.ticket_image_only_stub : "");
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Error"))
       .finally(() => setCargando(false));
@@ -98,6 +110,23 @@ export default function EditarSorteoPage() {
         estado,
         datos_bancarios: json,
         imagen_url: imagenUrl.trim() || null,
+        ticket_delivery_mode: ticketDeliveryMode,
+        ticket_image_config: {
+          title: ticketTitle.trim() || undefined,
+          caption: ticketCaption.trim() || undefined,
+          legalFooter: ticketLegal.trim() || undefined,
+          ticket_image_only_stub: ticketStub.trim() || undefined,
+          showLogo: true,
+          showClienteNombre: true,
+          showDocumento: true,
+          showTelefono: true,
+          showNumeroOrden: true,
+          showCupones: true,
+          showSorteoNombre: true,
+          primaryColor: "#0f172a",
+          secondaryColor: "#64748b",
+          backgroundColor: "#f8fafc",
+        },
       });
       setSuccess("Cambios guardados correctamente.");
       router.refresh();
@@ -137,6 +166,12 @@ export default function EditarSorteoPage() {
           className="inline-flex items-center rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-100"
         >
           Revendedores y enlaces de referido
+        </Link>
+        <Link
+          href="/sorteos/tickets"
+          className="inline-flex items-center rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-800 hover:bg-violet-100"
+        >
+          Tickets / Comprobantes
         </Link>
       </div>
 
@@ -234,6 +269,110 @@ export default function EditarSorteoPage() {
             onChange={(e) => setImagenUrl(e.target.value)}
           />
         </div>
+
+        <div className="border border-dashed border-slate-300 rounded-xl p-4 space-y-3 bg-slate-50/80">
+          <h2 className="text-sm font-semibold text-slate-800">Respuesta al comprador / Ticket</h2>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Modo de respuesta</label>
+            <select
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+              value={ticketDeliveryMode}
+              onChange={(e) => setTicketDeliveryMode(e.target.value as SorteoTicketDeliveryMode)}
+            >
+              <option value="text_only">Solo mensaje de texto (sin ticket PNG)</option>
+              <option value="text_and_image">Texto + ticket en imagen</option>
+              <option value="image_only">Solo ticket en imagen</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-600 mb-1">Título en el ticket</label>
+              <input
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                value={ticketTitle}
+                onChange={(e) => setTicketTitle(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-600 mb-1">Caption WhatsApp (imagen)</label>
+              <input
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                value={ticketCaption}
+                onChange={(e) => setTicketCaption(e.target.value)}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">Texto legal / pie</label>
+            <input
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+              value={ticketLegal}
+              onChange={(e) => setTicketLegal(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">
+              Texto corto (solo ticket imagen — opcional)
+            </label>
+            <input
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+              value={ticketStub}
+              onChange={(e) => setTicketStub(e.target.value)}
+              placeholder="Listo, generamos tu comprobante…"
+            />
+          </div>
+          <div className="flex flex-wrap gap-3 text-xs">
+            <label className="flex items-center gap-2">
+              Logo sorteo
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="text-xs"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  if (!f || !id) return;
+                  const fd = new FormData();
+                  fd.set("sorteo_id", id);
+                  fd.set("kind", "logo");
+                  fd.set("file", f);
+                  const res = await fetchWithSupabaseSession("/api/sorteos/ticket-assets", {
+                    method: "POST",
+                    body: fd,
+                  });
+                  if (!res.ok) alert(await res.text());
+                  else alert("Logo subido.");
+                }}
+              />
+            </label>
+            <label className="flex items-center gap-2">
+              Fondo (opcional)
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="text-xs"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  if (!f || !id) return;
+                  const fd = new FormData();
+                  fd.set("sorteo_id", id);
+                  fd.set("kind", "background");
+                  fd.set("file", f);
+                  const res = await fetchWithSupabaseSession("/api/sorteos/ticket-assets", {
+                    method: "POST",
+                    body: fd,
+                  });
+                  if (!res.ok) alert(await res.text());
+                  else alert("Fondo subido.");
+                }}
+              />
+            </label>
+          </div>
+          <p className="text-xs text-slate-500">
+            Vista previa básica: al guardar, el ticket usa empresa + datos del comprador en el flujo. Podés revisar
+            envíos en Sorteos → Tickets / Comprobantes.
+          </p>
+        </div>
+
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Datos bancarios (JSON)</label>
           <textarea

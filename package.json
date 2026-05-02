@@ -59,6 +59,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "recharts": "^2.15.4",
+    "sharp": "^0.34.5",
     "server-only": "^0.0.1",
     "tsx": "^4.21.0",
     "xml-crypto": "^6.1.2"
@@ -76,7 +77,6 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "playwright": "^1.58.2",
-    "sharp": "^0.34.5",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import {
+  aggregateBotClassificationReasons,
   buildActiveFlowMatchSet,
   buildFlowSessionMap,
   conversationBelongsToBotTab,
@@ -485,6 +486,14 @@ export async function fetchChatConversationsFromTenantPg(
     classifyCtx,
     activeFlowCatalogRowCount
   );
+
+  if (vista === "bot" && botTabCount === 0 && activeSessionByConversationId.size > 0) {
+    console.info("[chat-list][classification-reasons-summary]", {
+      schema: dataSchema,
+      empresa_id,
+      counts: aggregateBotClassificationReasons(listBeforeBotTabSplit, classifyCtx),
+    });
+  }
 
   if (rowsSnapshotForLogs.length > 0) {
     const contactIds = [

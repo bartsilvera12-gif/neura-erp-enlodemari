@@ -424,13 +424,43 @@ export function createFlowEngine(ctx: FlowEngineContext) {
         errMsg.includes("chat_flow_events_selected_option_id_fkey") ||
         (errMsg.includes("foreign key") && errMsg.includes("selected_option")))
     ) {
+      let schemaHint: string | null = null;
+      let optionFoundById = false;
+      try {
+        schemaHint = await fetchDataSchemaForEmpresaId(input.empresaId);
+        const probe = await supabase
+          .from("chat_flow_options")
+          .select("id")
+          .eq("id", input.selectedOptionId)
+          .maybeSingle();
+        optionFoundById = Boolean(probe.data);
+      } catch {
+        schemaHint = null;
+      }
+      const reason = optionFoundById
+        ? "fk_violation_option_exists_locally_migrate_tenant_selected_option_fk"
+        : "option_uuid_not_in_chat_flow_options";
+      console.info("[flow-engine][selected-option-resolution]", {
+        schema: schemaHint,
+        empresa_id: input.empresaId,
+        conversation_id: input.conversationId,
+        session_id: sid,
+        flow_code: input.flowCode ?? null,
+        current_node_code: input.nodeCode ?? null,
+        received_option_id: input.selectedOptionId,
+        option_found_by_id: optionFoundById,
+        option_found_by_payload: null,
+        option_found_in_current_node: null,
+        fallback_option_id_used: null,
+        reason,
+      });
       const { error: e2 } = await supabase.from("chat_flow_events").insert({
         ...row,
         selected_option_id: null,
         payload: {
           ...(row.payload as Record<string, unknown>),
           selected_option_id_omitted: true,
-          selected_option_id_omission_reason: "fk_invalid_option_id",
+          selected_option_id_omission_reason: reason,
         },
       });
       if (e2) {
@@ -439,6 +469,8 @@ export function createFlowEngine(ctx: FlowEngineContext) {
         console.warn("[flow-engine] chat_flow_events: omitió selected_option_id (FK inválida)", {
           conversationId: input.conversationId,
           optionId: input.selectedOptionId,
+          schema: schemaHint,
+          diagnosticReason: reason,
         });
       }
     } else if (error) {
@@ -814,7 +846,11 @@ export function createFlowEngine(ctx: FlowEngineContext) {
     const idIn = metaButtonId.trim();
     if (!idIn || options.length === 0) return undefined;
 
-    let picked = options.find((o) => String(o.meta_button_id ?? "").trim() === idIn);
+    /** WhatsApp puede devolver el UUID de fila `chat_flow_options.id` (reply id = id guardado al enviar). */
+    let picked = options.find((o) => String(o.id ?? "").trim() === idIn);
+    if (picked) return picked;
+
+    picked = options.find((o) => String(o.meta_button_id ?? "").trim() === idIn);
     if (picked) return picked;
 
     picked = options.find((o) => String(o.option_value ?? "").trim() === idIn);
@@ -854,6 +890,20 @@ export function createFlowEngine(ctx: FlowEngineContext) {
       if (matches.length === 1) {
         console.info("[flow-runtime]", "option_match_unique_button_title", { btnTitle });
         return matches[0];
+      }
+    }
+
+    /** Legado / flujo editado: id guardado en payload de la opción (no es la PK actual). */
+    for (const o of options) {
+      const pl = o.option_payload;
+      if (!pl || typeof pl !== "object" || Array.isArray(pl)) continue;
+      const p = pl as Record<string, unknown>;
+      for (const k of ["opcion_id", "legacy_option_id", "button_id", "value"]) {
+        const v = p[k];
+        if (v != null && String(v).trim() === idIn) {
+          console.info("[flow-runtime]", "option_match_by_payload_field", { idIn, field: k });
+          return o;
+        }
       }
     }
 
@@ -1134,6 +1184,8 @@ export function createFlowEngine(ctx: FlowEngineContext) {
       .update({
         flow_code: params.flowCode,
         flow_current_node: params.nextNodeCode,
+        flow_status: "bot",
+        human_taken_over: false,
         updated_at: new Date().toISOString(),
       })
       .eq("id", params.conversationId)
@@ -1696,6 +1748,52 @@ export function createFlowEngine(ctx: FlowEngineContext) {
         status: "missing_flow_session",
         error: "Sesión de flujo no inicializada; escribí hola para reiniciar.",
       };
+    }
+
+    {
+      const schemaTag = await fetchDataSchemaForEmpresaId(state.empresa_id);
+      const received = params.metaButtonId.trim();
+      const foundByRowId = options.some((o) => String(o.id ?? "").trim() === received);
+      const foundByMeta = options.some((o) => String(o.meta_button_id ?? "").trim() === received);
+      const foundByVal = options.some((o) => String(o.option_value ?? "").trim() === received);
+      let foundByPayload = false;
+      for (const o of options) {
+        const pl = o.option_payload;
+        if (!pl || typeof pl !== "object" || Array.isArray(pl)) continue;
+        const p = pl as Record<string, unknown>;
+        for (const k of ["opcion_id", "legacy_option_id", "button_id", "value"]) {
+          if (String(p[k] ?? "").trim() === received) {
+            foundByPayload = true;
+            break;
+          }
+        }
+        if (foundByPayload) break;
+      }
+      const { data: optRowProbe } = await supabase
+        .from("chat_flow_options")
+        .select("id")
+        .eq("id", selected.id)
+        .maybeSingle();
+      console.info("[flow-engine][selected-option-resolution]", {
+        schema: schemaTag,
+        empresa_id: state.empresa_id,
+        conversation_id: state.id,
+        session_id: flowSidInteractive,
+        flow_code: state.flow_code,
+        session_flow_code: state.flow_code,
+        current_node_id: currentNode.id,
+        current_node_code: currentNode.node_code,
+        received_option_id: received,
+        option_found_by_id: foundByRowId,
+        option_found_by_meta_button_id: foundByMeta,
+        option_found_by_option_value: foundByVal,
+        option_found_by_payload: foundByPayload,
+        option_found_in_current_node: options.some((o) => o.id === selected.id),
+        resolved_selected_id: selected.id,
+        option_row_visible_to_client: Boolean(optRowProbe),
+        fallback_option_id_used: null,
+        reason: "presubmit_interactive_resolve",
+      });
     }
 
     await insertFlowEvent({

@@ -231,6 +231,7 @@ function evaluateBotConversation(
 
   const sessFlow = String(session.flow_code ?? "").trim();
   const runningFlow = sessFlow || convFlow;
+  const catalogOk = Boolean(runningFlow && flowTokenMatchesActiveCatalog(runningFlow, ctx.activeFlowCodeSet));
 
   const flags = emptyFlags({
     ...baseFlags,
@@ -238,7 +239,7 @@ function evaluateBotConversation(
     sessionMatchesConversation,
     sessionStatus: sessStatus,
     resolutionPath,
-    runningFlowInCatalog: Boolean(runningFlow && flowTokenMatchesActiveCatalog(runningFlow, ctx.activeFlowCodeSet)),
+    runningFlowInCatalog: catalogOk,
   });
 
   if (!sessionMatchesConversation) {
@@ -254,11 +255,27 @@ function evaluateBotConversation(
     };
   }
 
-  if (!runningFlow || !flowTokenMatchesActiveCatalog(runningFlow, ctx.activeFlowCodeSet)) {
-    return { isBot: false, reason: "running_flow_not_in_active_catalog", resolvedSessionId: session.id, flags };
-  }
+  /** Sesión active/running en esta conversación: Bot aunque el token no coincida con catálogo (FK/eventos/flows editados). */
+  return {
+    isBot: true,
+    reason: catalogOk ? "ok_bot_tab" : "ok_bot_tab_active_session",
+    resolvedSessionId: session.id,
+    flags,
+  };
+}
 
-  return { isBot: true, reason: "ok_bot_tab", resolvedSessionId: session.id, flags };
+export function aggregateBotClassificationReasons(
+  rows: Record<string, unknown>[],
+  ctx: InboxBotClassificationInput
+): Record<string, number> {
+  const hist: Record<string, number> = {};
+  for (const row of rows) {
+    const ex = explainConversationBotClassification(row, ctx);
+    if (!ex.isBot) {
+      hist[ex.reason] = (hist[ex.reason] ?? 0) + 1;
+    }
+  }
+  return hist;
 }
 
 /**

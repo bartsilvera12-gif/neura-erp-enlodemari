@@ -1,6 +1,7 @@
 "use server";
 
 import {
+  aggregateBotClassificationReasons,
   buildActiveFlowMatchSet,
   buildFlowSessionMap,
   conversationBelongsToBotTab,
@@ -595,6 +596,14 @@ async function fetchChatConversationsUnsafe(
     classifyCtx,
     activeFlowCatalogRowCount
   );
+
+  if (vista === "bot" && botLikeCount === 0 && activeSessionByConversationId.size > 0) {
+    console.info("[chat-list][classification-reasons-summary]", {
+      schema: dataSchema,
+      empresa_id,
+      counts: aggregateBotClassificationReasons(listBeforeBotTabSplit, classifyCtx),
+    });
+  }
 
   if (vista === "inbox") {
     console.info("[chat-list][inbox]", {

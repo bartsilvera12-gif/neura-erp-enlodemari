@@ -401,6 +401,43 @@ export function ConversacionesClient({
 
   const inboxFilterKey = searchParams?.toString() ?? "";
 
+  /** Lectura siempre actual para sondeos silenciosos / realtime (evita filtros obsoletos en closure). */
+  const searchParamsRef = useRef(searchParams);
+  searchParamsRef.current = searchParams;
+
+  /** Optimista: `router.replace` actualiza la URL un tick después; sin esto el select vuelve al valor anterior. */
+  const [pendingCanal, setPendingCanal] = useState<string | null>(null);
+  const [pendingCola, setPendingCola] = useState<string | null>(null);
+  const [pendingAsignacion, setPendingAsignacion] = useState<string | null>(null);
+
+  const urlCanal = searchParams?.get("canal")?.trim() ?? "";
+  const urlCola = searchParams?.get("cola")?.trim() ?? "";
+  const urlAsignacionRaw = searchParams?.get("asignacion")?.trim();
+  const urlAsignacion =
+    urlAsignacionRaw === "mios" ? "mios" : urlAsignacionRaw === "sin_asignar" ? "sin_asignar" : "";
+
+  const displayCanal = pendingCanal !== null ? pendingCanal : urlCanal;
+  const displayCola = pendingCola !== null ? pendingCola : urlCola;
+  const displayAsignacion = pendingAsignacion !== null ? pendingAsignacion : urlAsignacion;
+
+  useEffect(() => {
+    if (pendingCanal !== null && pendingCanal === urlCanal) setPendingCanal(null);
+  }, [pendingCanal, urlCanal]);
+  useEffect(() => {
+    if (pendingCola !== null && pendingCola === urlCola) setPendingCola(null);
+  }, [pendingCola, urlCola]);
+  useEffect(() => {
+    if (pendingAsignacion !== null && pendingAsignacion === urlAsignacion) setPendingAsignacion(null);
+  }, [pendingAsignacion, urlAsignacion]);
+
+  /** Si la URL corrige un canal inválido (p. ej. ya no existe), alinear UI optimista. */
+  useEffect(() => {
+    if (pendingCanal === null || inboxChannels.length === 0) return;
+    if (urlCanal !== "") return;
+    const stillValid = inboxChannels.some((c) => c.id === pendingCanal);
+    if (!stillValid) setPendingCanal(null);
+  }, [pendingCanal, urlCanal, inboxChannels]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedIdRef = useRef<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -416,10 +453,15 @@ export function ConversacionesClient({
   /** Dedupe de ids de mensaje entrante ya notificados con sonido. */
   const inboundSoundMsgIdsRef = useRef<Set<string>>(new Set());
 
+  /** Evita aplicar respuestas viejas si el usuario cambió de chat rápido. */
+  const messagesLoadGenRef = useRef(0);
+  /** Cache en memoria por sesión: reabrir conversación muestra historial al instante y refresca después. */
+  const messagesSessionCacheRef = useRef<Map<string, ChatMessage[]>>(new Map());
+
   const loadConversations = useCallback(
     async (opts?: { silent?: boolean }) => {
       const silent = opts?.silent ?? false;
-      const sp = new URLSearchParams(inboxFilterKey);
+      const sp = new URLSearchParams(searchParamsRef.current?.toString() ?? "");
       const filters = parseInboxFilters(sp);
       const previousCount = conversationsRef.current.length;
       if (silent) {
@@ -509,13 +551,27 @@ export function ConversacionesClient({
         }
       }
     },
-    [vista, inboxFilterKey]
+    [vista]
   );
 
   const loadMessages = useCallback(async (conversationId: string, opts?: { silent?: boolean }) => {
     const silent = opts?.silent ?? false;
-    if (!silent) setLoadingMsg(true);
-    setMessagesError(null);
+    const ticket = silent ? -1 : ++messagesLoadGenRef.current;
+
+    if (!silent) {
+      setMessagesError(null);
+      const cached = messagesSessionCacheRef.current.get(conversationId);
+      if (cached && cached.length > 0) {
+        setMessages(cached);
+        setLoadingMsg(false);
+      } else {
+        setMessages([]);
+        setLoadingMsg(true);
+      }
+    } else {
+      setMessagesError(null);
+    }
+
     try {
       const qs = new URLSearchParams({ conversation_id: conversationId });
       const res = await fetchWithSupabaseSession(`/api/chat/messages?${qs.toString()}`, {
@@ -533,15 +589,42 @@ export function ConversacionesClient({
       }
       const json = (await res.json()) as { success?: boolean; data?: Record<string, unknown>[] };
       if (!json.success || !Array.isArray(json.data)) {
-        setMessages([]);
+        if (
+          !silent &&
+          ticket === messagesLoadGenRef.current &&
+          selectedIdRef.current === conversationId
+        ) {
+          setMessages([]);
+          messagesSessionCacheRef.current.delete(conversationId);
+        }
         return;
       }
-      setMessages(json.data.map(mapRowToMessage));
+      const mapped = json.data.map(mapRowToMessage);
+      messagesSessionCacheRef.current.set(conversationId, mapped);
+
+      if (silent) {
+        if (selectedIdRef.current !== conversationId) return;
+        setMessages(mapped);
+        return;
+      }
+
+      if (ticket !== messagesLoadGenRef.current || selectedIdRef.current !== conversationId) {
+        return;
+      }
+      setMessages(mapped);
     } catch (e) {
-      setMessages([]);
+      if (silent) return;
+      if (ticket !== messagesLoadGenRef.current) return;
+      if (selectedIdRef.current !== conversationId) return;
+      const cachedFallback = messagesSessionCacheRef.current.get(conversationId);
+      if (!cachedFallback?.length) {
+        setMessages([]);
+      }
       setMessagesError(e instanceof Error ? e.message : "Error al cargar mensajes");
     } finally {
-      if (!silent) setLoadingMsg(false);
+      if (!silent && ticket === messagesLoadGenRef.current && selectedIdRef.current === conversationId) {
+        setLoadingMsg(false);
+      }
     }
   }, []);
 
@@ -644,8 +727,8 @@ export function ConversacionesClient({
 
   useEffect(() => {
     setLoadingList(true);
-    loadConversations();
-  }, [loadConversations]);
+    void loadConversations();
+  }, [loadConversations, inboxFilterKey]);
 
   useEffect(() => {
     listChatQueues()
@@ -964,14 +1047,17 @@ export function ConversacionesClient({
       const msg = mapRowToMessage(row);
       setMessages((prev) => {
         const i = prev.findIndex((m) => m.id === msg.id);
+        let next: ChatMessage[];
         if (i >= 0) {
-          const next = [...prev];
+          next = [...prev];
           next[i] = msg;
-          return next;
+        } else {
+          next = [...prev, msg].sort(
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          );
         }
-        return [...prev, msg].sort(
-          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        );
+        messagesSessionCacheRef.current.set(selectedId, next);
+        return next;
       });
     };
 
@@ -1894,9 +1980,10 @@ export function ConversacionesClient({
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Canal</span>
             <select
               className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white min-w-[12rem] max-w-[min(22rem,90vw)]"
-              value={searchParams?.get("canal") ?? ""}
+              value={displayCanal}
               onChange={(e) => {
                 const v = e.target.value.trim();
+                setPendingCanal(v.length > 0 ? v : "");
                 patchInboxQuery({ canal: v.length > 0 ? v : null });
               }}
               aria-label="Filtrar por canal"
@@ -1913,9 +2000,10 @@ export function ConversacionesClient({
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Cola</span>
             <select
               className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white min-w-[11rem]"
-              value={searchParams?.get("cola") ?? ""}
+              value={displayCola}
               onChange={(e) => {
                 const v = e.target.value.trim();
+                setPendingCola(v.length > 0 ? v : "");
                 patchInboxQuery({ cola: v.length > 0 ? v : null });
               }}
               aria-label="Filtrar por cola"
@@ -1934,15 +2022,10 @@ export function ConversacionesClient({
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Asignación</span>
             <select
               className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white min-w-[11rem]"
-              value={
-                searchParams?.get("asignacion") === "mios"
-                  ? "mios"
-                  : searchParams?.get("asignacion") === "sin_asignar"
-                    ? "sin_asignar"
-                    : ""
-              }
+              value={displayAsignacion}
               onChange={(e) => {
                 const v = e.target.value;
+                setPendingAsignacion(v === "" ? "" : v);
                 patchInboxQuery({ asignacion: v === "" ? null : v });
               }}
               aria-label="Filtrar por asignación"
@@ -2369,6 +2452,12 @@ export function ConversacionesClient({
               >
                 {loadingMsg ? (
                   <div className="text-center text-slate-400 text-sm py-8">Cargando mensajes…</div>
+                ) : messages.length === 0 ? (
+                  <div className="text-center text-slate-500 text-sm py-8 px-3">
+                    {messagesError
+                      ? "No se pudieron cargar los mensajes. Reintentá o revisá la barra de avisos arriba."
+                      : "No hay mensajes para esta conversación."}
+                  </div>
                 ) : (
                   messages.map((m, idx) => {
                     const attachUrl = resolveAttachmentUrl(m);

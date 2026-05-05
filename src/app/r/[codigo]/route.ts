@@ -296,7 +296,8 @@ export async function GET(
   });
 
   if (insErr) {
-    console.error("[sorteo-r] sorteo_revendedor_clicks:", insErr.message);
+    const code = (insErr as { code?: string }).code;
+    console.error("[sorteo-r] sorteo_revendedor_clicks:", insErr.message, code ?? "");
     return new NextResponse("No se pudo registrar el click.", {
       status: 500,
       headers: { "content-type": "text/plain; charset=utf-8" },

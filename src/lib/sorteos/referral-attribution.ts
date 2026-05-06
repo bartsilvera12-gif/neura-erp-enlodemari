@@ -3,6 +3,31 @@ import { extractReferralTokenFromInboundText } from "@/lib/sorteos/referral-inbo
 
 const LOG = "[sorteo-referral]" as const;
 
+const ERR_MAX = 280;
+
+function clipErr(msg: string | undefined): string | undefined {
+  if (!msg || typeof msg !== "string") return undefined;
+  const t = msg.trim();
+  if (t.length <= ERR_MAX) return t;
+  return t.slice(0, ERR_MAX) + "…";
+}
+
+/** Token opaco: solo extremos, nunca el valor completo. */
+function partialToken(tok: string | null | undefined): string | null {
+  if (!tok?.trim()) return null;
+  const t = tok.trim();
+  if (t.length <= 10) return `[len:${t.length}]`;
+  return `${t.slice(0, 4)}…${t.slice(-4)}`;
+}
+
+/** UUID: solo extremos. */
+function partialUuid(id: string | null | undefined): string | null {
+  if (!id?.trim()) return null;
+  const t = id.trim();
+  if (t.length <= 14) return `[len:${t.length}]`;
+  return `${t.slice(0, 8)}…${t.slice(-4)}`;
+}
+
 export type ApplyReferralParams = {
   supabase: SupabaseAdmin;
   empresaId: string;
@@ -21,12 +46,34 @@ export type ApplyReferralParams = {
 export async function applySorteoReferralToActiveSession(
   params: ApplyReferralParams
 ): Promise<void> {
+  const tokenForLog = extractReferralTokenFromInboundText(params.inboundText);
+  const inboundTrim = (params.inboundText ?? "").trim();
+  console.info(LOG, "apply_enter", {
+    hasInboundText: inboundTrim.length > 0,
+    hasToken: Boolean(tokenForLog),
+    tokenPartial: partialToken(tokenForLog),
+    conversationId: params.conversationId,
+    activeFlowSessionPresent: Boolean(params.activeFlowSessionId?.trim()),
+    flowCodePresent: Boolean(params.flowCode?.trim()),
+    empresaId: partialUuid(params.empresaId),
+  });
+
   const sid = params.activeFlowSessionId?.trim();
   const fc = params.flowCode?.trim();
-  if (!sid || !fc) return;
+  if (!sid || !fc) {
+    console.info(LOG, "early_exit", {
+      reason: "missing_session_or_flow",
+      hasSid: Boolean(sid),
+      hasFlowCode: Boolean(fc),
+    });
+    return;
+  }
 
   const tokenRaw = extractReferralTokenFromInboundText(params.inboundText);
-  if (!tokenRaw) return;
+  if (!tokenRaw) {
+    console.info(LOG, "early_exit", { reason: "missing_token_in_text" });
+    return;
+  }
 
   const { data: sessionRow, error: sErr } = await params.supabase
     .from("chat_flow_sessions")
@@ -35,22 +82,41 @@ export async function applySorteoReferralToActiveSession(
     .eq("empresa_id", params.empresaId)
     .maybeSingle();
 
+  console.info(LOG, "session_query", {
+    sessionFound: Boolean(sessionRow) && !sErr,
+    error: clipErr(sErr?.message),
+    conversationId: params.conversationId,
+    activeFlowSessionId: partialUuid(sid),
+  });
+
   if (sErr || !sessionRow) {
     console.warn(LOG, "session_load_failed", sErr?.message);
     return;
   }
 
-  if ((sessionRow as { revendedor_id?: string | null }).revendedor_id) {
-    return;
-  }
-
+  const existingRev = (sessionRow as { revendedor_id?: string | null }).revendedor_id;
   const convIdFromSession = (sessionRow as { conversation_id?: string }).conversation_id;
-  if (convIdFromSession !== params.conversationId) {
-    console.warn(LOG, "session_conversation_mismatch", { sid, conversationId: params.conversationId });
+  console.info(LOG, "session_row", {
+    sessionFound: true,
+    sessionConversationMatches: convIdFromSession === params.conversationId,
+    alreadyHasRevendedor: Boolean(existingRev),
+    activeFlowSessionId: partialUuid(sid),
+  });
+
+  if (existingRev) {
+    console.info(LOG, "early_exit", { reason: "session_already_has_revendedor" });
     return;
   }
 
-  const { data: flowRow } = await params.supabase
+  if (convIdFromSession !== params.conversationId) {
+    console.warn(LOG, "session_conversation_mismatch", {
+      sid: partialUuid(sid),
+      conversationId: params.conversationId,
+    });
+    return;
+  }
+
+  const { data: flowRow, error: flowErr } = await params.supabase
     .from("chat_flows")
     .select("sorteo_id")
     .eq("empresa_id", params.empresaId)
@@ -58,18 +124,35 @@ export async function applySorteoReferralToActiveSession(
     .maybeSingle();
 
   const sorteoId = (flowRow as { sorteo_id?: string | null } | null)?.sorteo_id?.trim() ?? null;
+  console.info(LOG, "flow_lookup", {
+    flowCode: fc,
+    hasSorteoId: Boolean(sorteoId),
+    flowSorteoIdPartial: partialUuid(sorteoId),
+    error: clipErr(flowErr?.message),
+  });
+
   if (!sorteoId) {
+    console.info(LOG, "early_exit", {
+      reason: flowErr ? "flow_query_error_or_empty" : "flow_missing_sorteo_id",
+      flowCode: fc,
+    });
     return;
   }
 
   const nowIso = new Date().toISOString();
 
-  const { data: clickRow } = await params.supabase
+  const { data: clickRow, error: clickErr } = await params.supabase
     .from("sorteo_revendedor_clicks")
     .select("id, revendedor_id, sorteo_id, empresa_id, redeemed_at, expires_at")
     .eq("attribution_token", tokenRaw)
     .eq("empresa_id", params.empresaId)
     .maybeSingle();
+
+  console.info(LOG, "click_lookup", {
+    clickFound: Boolean(clickRow) && !clickErr,
+    tokenPartial: partialToken(tokenRaw),
+    error: clipErr(clickErr?.message),
+  });
 
   const click = clickRow as
     | {
@@ -80,6 +163,26 @@ export async function applySorteoReferralToActiveSession(
         expires_at: string;
       }
     | null;
+
+  const expired =
+    click && new Date(click.expires_at).getTime() <= Date.now();
+  if (click && click.redeemed_at) {
+    console.info(LOG, "discard_click", { reason: "already_redeemed", clickIdPartial: partialUuid(click.id) });
+  } else if (click && click.sorteo_id !== sorteoId) {
+    console.info(LOG, "discard_click", {
+      reason: "sorteo_mismatch",
+      clickSorteoIdPartial: partialUuid(click.sorteo_id),
+      flowSorteoIdPartial: partialUuid(sorteoId),
+      isExpired: Boolean(expired),
+    });
+  } else if (click && expired) {
+    console.info(LOG, "discard_click", {
+      reason: "expired_click",
+      clickSorteoIdPartial: partialUuid(click.sorteo_id),
+      flowSorteoIdPartial: partialUuid(sorteoId),
+      isExpired: true,
+    });
+  }
 
   if (
     click &&
@@ -99,6 +202,12 @@ export async function applySorteoReferralToActiveSession(
       | null;
 
     if (!r || !r.activo || r.sorteo_id !== sorteoId) {
+      console.info(LOG, "early_exit", {
+        reason: "revendedor_row_invalid",
+        hasRevRow: Boolean(r),
+        activo: r?.activo ?? null,
+        revSorteoMatches: r ? r.sorteo_id === sorteoId : null,
+      });
       return;
     }
 
@@ -115,10 +224,14 @@ export async function applySorteoReferralToActiveSession(
 
     if (upSess) {
       console.warn(LOG, "session_update_click_failed", upSess.message);
+      console.info(LOG, "update_failed", {
+        reason: "session_update_failed",
+        error: clipErr(upSess.message),
+      });
       return;
     }
 
-    await params.supabase
+    const { error: clickUpErr } = await params.supabase
       .from("sorteo_revendedor_clicks")
       .update({
         redeemed_at: nowIso,
@@ -128,6 +241,14 @@ export async function applySorteoReferralToActiveSession(
       })
       .eq("id", click.id)
       .is("redeemed_at", null);
+
+    if (clickUpErr) {
+      console.warn(LOG, "click_redeem_update_failed", clickUpErr.message);
+      console.info(LOG, "update_failed", {
+        reason: "click_update_failed",
+        error: clipErr(clickUpErr.message),
+      });
+    }
 
     await setFirstRevendedorOnConversation(
       params.supabase,
@@ -140,6 +261,13 @@ export async function applySorteoReferralToActiveSession(
       conversationId: params.conversationId,
       flowSessionId: sid,
       revendedorId: r.id,
+    });
+    console.info(LOG, "redeemed_ok", {
+      reason: "redeemed_ok",
+      conversationId: params.conversationId,
+      activeFlowSessionId: partialUuid(sid),
+      revendedorIdPartial: partialUuid(r.id),
+      clickIdPartial: partialUuid(click.id),
     });
     return;
   }
@@ -157,6 +285,11 @@ export async function applySorteoReferralToActiveSession(
     | null;
 
   if (!rc || !rc.activo) {
+    console.info(LOG, "early_exit", {
+      reason: "inbound_code_path_no_match",
+      hasRevendedorRow: Boolean(rc),
+      activo: rc?.activo ?? null,
+    });
     return;
   }
 
@@ -173,6 +306,10 @@ export async function applySorteoReferralToActiveSession(
 
   if (upSess2) {
     console.warn(LOG, "session_update_code_failed", upSess2.message);
+    console.info(LOG, "update_failed", {
+      reason: "session_update_failed",
+      error: clipErr(upSess2.message),
+    });
     return;
   }
 
@@ -207,7 +344,7 @@ async function setFirstRevendedorOnConversation(
     return;
   }
 
-  await supabase
+  const { error: convUpErr } = await supabase
     .from("chat_conversations")
     .update({
       first_revendedor_id: revendedorId,
@@ -217,4 +354,12 @@ async function setFirstRevendedorOnConversation(
     .eq("id", conversationId)
     .eq("empresa_id", empresaId)
     .is("first_revendedor_id", null);
+
+  if (convUpErr) {
+    console.warn(LOG, "conversation_first_revendedor_update_failed", convUpErr.message);
+    console.info(LOG, "update_failed", {
+      reason: "conversation_update_failed",
+      error: clipErr(convUpErr.message),
+    });
+  }
 }

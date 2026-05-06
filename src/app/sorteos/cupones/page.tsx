@@ -1,9 +1,11 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import {
   fetchSorteoCuponesOrdenesServer,
   type SorteoEntradasListParams,
 } from "@/lib/sorteos/server-queries";
 import type { SorteoEntradaEstadoPago } from "@/lib/sorteos/types";
+import SorteosCuponesManualClient from "@/components/sorteos/SorteosCuponesManualClient";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -101,9 +103,14 @@ export default async function SorteoCuponesPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-800">Cupones</h1>
-        <p className="text-gray-500 text-sm mt-1">Órdenes con números de cupón generados</p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-800">Cupones</h1>
+          <p className="text-gray-500 text-sm mt-1">Órdenes con números de cupón generados</p>
+        </div>
+        <Suspense fallback={null}>
+          <SorteosCuponesManualClient />
+        </Suspense>
       </div>
 
       <nav className="flex flex-wrap gap-2 text-sm border-b border-slate-200 pb-3">

@@ -1,11 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import MontoInput from "@/components/ui/MontoInput";
+import SelectFromList from "@/components/inventario/SelectFromList";
 import { productoExiste, saveProducto } from "@/lib/inventario/storage";
 import type { MetodoValuacion } from "@/lib/inventario/types";
+
+interface CatRow { id: string; nombre: string }
+interface UbiRow { id: string; nombre: string; tipo: string }
+interface ProvRow { id: string; nombre: string }
 
 export default function NuevoProductoPage() {
   const router = useRouter();
@@ -27,6 +32,37 @@ export default function NuevoProductoPage() {
   const [submitting, setSubmitting] = useState(false);
   const [generandoCodigo, setGenerandoCodigo] = useState(false);
   const [codigoGeneradoInterno, setCodigoGeneradoInterno] = useState(false);
+
+  // Relaciones opcionales
+  const [categoriaId, setCategoriaId] = useState<string | null>(null);
+  const [ubicacionId, setUbicacionId] = useState<string | null>(null);
+  const [proveedorId, setProveedorId] = useState<string | null>(null);
+  const [categorias, setCategorias] = useState<CatRow[]>([]);
+  const [ubicaciones, setUbicaciones] = useState<UbiRow[]>([]);
+  const [proveedores, setProveedores] = useState<ProvRow[]>([]);
+
+  useEffect(() => {
+    let cancel = false;
+    async function load(url: string) {
+      try {
+        const r = await fetch(url, { credentials: "include" });
+        const j = await r.json();
+        return r.ok && j?.success ? j.data : null;
+      } catch { return null; }
+    }
+    (async () => {
+      const [cats, ubis, provs] = await Promise.all([
+        load("/api/inventario/categorias"),
+        load("/api/inventario/ubicaciones"),
+        load("/api/proveedores"),
+      ]);
+      if (cancel) return;
+      if (cats?.categorias) setCategorias(cats.categorias as CatRow[]);
+      if (ubis?.ubicaciones) setUbicaciones(ubis.ubicaciones as UbiRow[]);
+      if (provs?.proveedores) setProveedores(provs.proveedores as ProvRow[]);
+    })();
+    return () => { cancel = true; };
+  }, []);
 
   // Imagen pendiente de subir (se sube luego de crear el producto, con su ID).
   const [imagenFile, setImagenFile] = useState<File | null>(null);
@@ -224,6 +260,9 @@ export default function NuevoProductoPage() {
           metodo_valuacion: form.metodo_valuacion,
           codigo_barras: codigo,
           codigo_barras_interno: interno,
+          categoria_principal_id: categoriaId,
+          ubicacion_principal_id: ubicacionId,
+          proveedor_principal_id: proveedorId,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "No se pudo guardar el producto.";
@@ -542,6 +581,59 @@ export default function NuevoProductoPage() {
 
               </div>
             )}
+          </div>
+
+          {/* Clasificación, Proveedor, Ubicación */}
+          <div className="border-t border-slate-100 pt-6">
+            <p className="text-xs text-gray-400 mb-3 uppercase tracking-wide font-semibold">
+              Clasificación y ubicación — opcional
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className={labelClass}>Categoría principal</label>
+                <SelectFromList
+                  value={categoriaId}
+                  onChange={setCategoriaId}
+                  options={categorias.map((c) => ({ id: c.id, label: c.nombre }))}
+                  emptyText="Todavía no cargaste categorías."
+                />
+                <div className="mt-1.5 text-xs">
+                  <Link href="/inventario/categorias" className="text-sky-700 hover:text-sky-900 underline">
+                    {categorias.length === 0 ? "Crear primera categoría" : "Administrar categorías"}
+                  </Link>
+                </div>
+              </div>
+
+              <div>
+                <label className={labelClass}>Proveedor principal</label>
+                <SelectFromList
+                  value={proveedorId}
+                  onChange={setProveedorId}
+                  options={proveedores.map((p) => ({ id: p.id, label: p.nombre }))}
+                  emptyText="Todavía no cargaste proveedores."
+                />
+                <div className="mt-1.5 text-xs">
+                  <Link href="/proveedores/nuevo" className="text-sky-700 hover:text-sky-900 underline">
+                    {proveedores.length === 0 ? "Crear primer proveedor" : "Administrar proveedores"}
+                  </Link>
+                </div>
+              </div>
+
+              <div>
+                <label className={labelClass}>Ubicación principal</label>
+                <SelectFromList
+                  value={ubicacionId}
+                  onChange={setUbicacionId}
+                  options={ubicaciones.map((u) => ({ id: u.id, label: u.nombre, sublabel: u.tipo }))}
+                  emptyText="Todavía no cargaste ubicaciones."
+                />
+                <div className="mt-1.5 text-xs">
+                  <Link href="/inventario/ubicaciones" className="text-sky-700 hover:text-sky-900 underline">
+                    {ubicaciones.length === 0 ? "Crear primera ubicación" : "Administrar ubicaciones"}
+                  </Link>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Stock actual + Stock mínimo */}

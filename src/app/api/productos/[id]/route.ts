@@ -8,6 +8,26 @@ import {
   rowToProductoApi,
   DuplicadoError,
 } from "@/lib/inventario/server/productos-pg";
+import { setCategoriaPrincipal } from "@/lib/inventario/server/catalogos-pg";
+import { getChatPostgresPool, quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
+import { assertAllowedChatDataSchema } from "@/lib/supabase/chat-data-schema";
+
+async function existsInTenant(
+  schema: string,
+  empresaId: string,
+  table: "categorias_productos" | "inventario_ubicaciones" | "proveedores",
+  id: string
+): Promise<boolean> {
+  const pool = getChatPostgresPool();
+  if (!pool) throw new Error("Pool no disponible.");
+  const s = assertAllowedChatDataSchema(schema);
+  const t = quoteSchemaTable(s, table);
+  const { rows } = await pool.query<{ ok: number }>(
+    `SELECT 1 AS ok FROM ${t} WHERE id = $1::uuid AND empresa_id = $2::uuid LIMIT 1`,
+    [id, empresaId]
+  );
+  return rows.length > 0;
+}
 
 /**
  * PATCH /api/productos/[id]
@@ -64,10 +84,48 @@ export async function PATCH(
       patch.imagen_url = v || null;
     }
 
+    // Relaciones opcionales — validar ownership
+    let categoriaCambia = false;
+    let categoriaNueva: string | null = null;
+    if (body.categoria_principal_id !== undefined) {
+      const v = body.categoria_principal_id == null ? null : String(body.categoria_principal_id);
+      if (v && !(await existsInTenant(schema, empresaId, "categorias_productos", v))) {
+        return NextResponse.json(errorResponse("La categoría seleccionada no existe."), { status: 400 });
+      }
+      patch.categoria_principal_id = v;
+      categoriaCambia = true;
+      categoriaNueva = v;
+    }
+    if (body.ubicacion_principal_id !== undefined) {
+      const v = body.ubicacion_principal_id == null ? null : String(body.ubicacion_principal_id);
+      if (v && !(await existsInTenant(schema, empresaId, "inventario_ubicaciones", v))) {
+        return NextResponse.json(errorResponse("La ubicación seleccionada no existe."), { status: 400 });
+      }
+      patch.ubicacion_principal_id = v;
+    }
+    if (body.proveedor_principal_id !== undefined) {
+      const v = body.proveedor_principal_id == null ? null : String(body.proveedor_principal_id);
+      if (v && !(await existsInTenant(schema, empresaId, "proveedores", v))) {
+        return NextResponse.json(errorResponse("El proveedor seleccionado no existe."), { status: 400 });
+      }
+      patch.proveedor_principal_id = v;
+    }
+
     try {
       const row = await updateProductoPg(schema, empresaId, id, patch);
       if (!row) {
         return NextResponse.json(errorResponse(API_ERRORS.NOT_FOUND), { status: 404 });
+      }
+      // Sincronizar categoria principal en puente producto_categorias
+      if (categoriaCambia) {
+        try {
+          await setCategoriaPrincipal(schema, empresaId, id, categoriaNueva);
+        } catch (err) {
+          console.error("[/api/productos/[id]] setCategoriaPrincipal fallo", {
+            schema, empresaId, id,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
       return NextResponse.json(successResponse({ producto: rowToProductoApi(row) }));
     } catch (err) {

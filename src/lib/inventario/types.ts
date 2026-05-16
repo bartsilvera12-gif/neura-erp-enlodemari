@@ -16,6 +16,9 @@ export interface Producto {
   codigo_barras_interno?: boolean;
   imagen_path?: string | null;
   imagen_url?: string | null;
+  categoria_principal_id?: string | null;
+  ubicacion_principal_id?: string | null;
+  proveedor_principal_id?: string | null;
 }
 
 export interface MovimientoInventario {

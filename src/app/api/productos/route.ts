@@ -9,6 +9,30 @@ import {
   rowToProductoApi,
   DuplicadoError,
 } from "@/lib/inventario/server/productos-pg";
+import {
+  setCategoriaPrincipal,
+  setStockUbicacionInicial,
+} from "@/lib/inventario/server/catalogos-pg";
+import { getChatPostgresPool, quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
+import { assertAllowedChatDataSchema } from "@/lib/supabase/chat-data-schema";
+
+/** Valida que un id existe en la tabla indicada para la empresa. Devuelve true si OK, false si no. */
+async function existsInTenant(
+  schema: string,
+  empresaId: string,
+  table: "categorias_productos" | "inventario_ubicaciones" | "proveedores",
+  id: string
+): Promise<boolean> {
+  const pool = getChatPostgresPool();
+  if (!pool) throw new Error("Pool no disponible.");
+  const s = assertAllowedChatDataSchema(schema);
+  const t = quoteSchemaTable(s, table);
+  const { rows } = await pool.query<{ ok: number }>(
+    `SELECT 1 AS ok FROM ${t} WHERE id = $1::uuid AND empresa_id = $2::uuid LIMIT 1`,
+    [id, empresaId]
+  );
+  return rows.length > 0;
+}
 
 /**
  * POST /api/productos
@@ -51,6 +75,21 @@ export async function POST(request: NextRequest) {
         ? (body.metodo_valuacion as "FIFO" | "LIFO")
         : "CPP";
 
+    // Relaciones opcionales — validar ownership en mismo tenant
+    const categoriaPrincipalId = body.categoria_principal_id ? String(body.categoria_principal_id) : null;
+    const ubicacionPrincipalId = body.ubicacion_principal_id ? String(body.ubicacion_principal_id) : null;
+    const proveedorPrincipalId = body.proveedor_principal_id ? String(body.proveedor_principal_id) : null;
+
+    if (categoriaPrincipalId && !(await existsInTenant(schema, empresaId, "categorias_productos", categoriaPrincipalId))) {
+      return NextResponse.json(errorResponse("La categoría seleccionada no existe."), { status: 400 });
+    }
+    if (ubicacionPrincipalId && !(await existsInTenant(schema, empresaId, "inventario_ubicaciones", ubicacionPrincipalId))) {
+      return NextResponse.json(errorResponse("La ubicación seleccionada no existe."), { status: 400 });
+    }
+    if (proveedorPrincipalId && !(await existsInTenant(schema, empresaId, "proveedores", proveedorPrincipalId))) {
+      return NextResponse.json(errorResponse("El proveedor seleccionado no existe."), { status: 400 });
+    }
+
     try {
       const row = await insertProducto(schema, empresaId, {
         nombre,
@@ -63,6 +102,9 @@ export async function POST(request: NextRequest) {
         metodo_valuacion: metodoValuacion,
         codigo_barras: codigoBarras,
         codigo_barras_interno: codigoBarrasInterno,
+        categoria_principal_id: categoriaPrincipalId,
+        ubicacion_principal_id: ubicacionPrincipalId,
+        proveedor_principal_id: proveedorPrincipalId,
       });
 
       // Inventario inicial (mismo schema, via PG directo).
@@ -83,6 +125,30 @@ export async function POST(request: NextRequest) {
             message: movErr instanceof Error ? movErr.message : String(movErr),
           });
           // No revertimos el producto; el alta principal queda.
+        }
+      }
+
+      // Categoria principal: tambien insertar en puente producto_categorias.
+      if (categoriaPrincipalId) {
+        try {
+          await setCategoriaPrincipal(schema, empresaId, row.id, categoriaPrincipalId);
+        } catch (err) {
+          console.error("[/api/productos] setCategoriaPrincipal fallo", {
+            schema, empresaId, productoId: row.id,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      // Stock inicial por ubicacion (no reemplaza productos.stock_actual).
+      if (ubicacionPrincipalId && stockActual > 0) {
+        try {
+          await setStockUbicacionInicial(schema, empresaId, row.id, ubicacionPrincipalId, stockActual);
+        } catch (err) {
+          console.error("[/api/productos] setStockUbicacionInicial fallo", {
+            schema, empresaId, productoId: row.id,
+            message: err instanceof Error ? err.message : String(err),
+          });
         }
       }
 

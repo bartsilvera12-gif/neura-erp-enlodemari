@@ -27,6 +27,9 @@ interface ProductoRow {
   codigo_barras_interno?: boolean | null;
   imagen_path?: string | null;
   imagen_url?: string | null;
+  categoria_principal_id?: string | null;
+  ubicacion_principal_id?: string | null;
+  proveedor_principal_id?: string | null;
 }
 
 interface MovimientoRow {
@@ -62,6 +65,9 @@ function rowToProducto(row: ProductoRow): Producto {
     codigo_barras_interno: row.codigo_barras_interno ?? false,
     imagen_path: row.imagen_path ?? null,
     imagen_url: row.imagen_url ?? null,
+    categoria_principal_id: row.categoria_principal_id ?? null,
+    ubicacion_principal_id: row.ubicacion_principal_id ?? null,
+    proveedor_principal_id: row.proveedor_principal_id ?? null,
   };
 }
 
@@ -162,6 +168,9 @@ export async function saveProducto(
         ? datos.codigo_barras
         : null,
     codigo_barras_interno: datos.codigo_barras_interno === true,
+    categoria_principal_id: datos.categoria_principal_id ?? null,
+    ubicacion_principal_id: datos.ubicacion_principal_id ?? null,
+    proveedor_principal_id: datos.proveedor_principal_id ?? null,
   };
 
   const res = await fetch("/api/productos", {
@@ -210,6 +219,9 @@ export async function updateProducto(
   if (datos.codigo_barras_interno !== undefined) body.codigo_barras_interno = datos.codigo_barras_interno;
   if (datos.imagen_path !== undefined) body.imagen_path = datos.imagen_path ?? null;
   if (datos.imagen_url !== undefined) body.imagen_url = datos.imagen_url ?? null;
+  if (datos.categoria_principal_id !== undefined) body.categoria_principal_id = datos.categoria_principal_id ?? null;
+  if (datos.ubicacion_principal_id !== undefined) body.ubicacion_principal_id = datos.ubicacion_principal_id ?? null;
+  if (datos.proveedor_principal_id !== undefined) body.proveedor_principal_id = datos.proveedor_principal_id ?? null;
 
   const res = await fetch(`/api/productos/${encodeURIComponent(id)}`, {
     method: "PATCH",

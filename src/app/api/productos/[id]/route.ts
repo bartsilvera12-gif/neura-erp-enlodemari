@@ -9,6 +9,7 @@ import {
   DuplicadoError,
 } from "@/lib/inventario/server/productos-pg";
 import { setCategoriaPrincipal } from "@/lib/inventario/server/catalogos-pg";
+import { normalizeUpperText, normalizeUpperCodigoBarras } from "@/lib/text/normalize";
 import { getChatPostgresPool, quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
 import { assertAllowedChatDataSchema } from "@/lib/supabase/chat-data-schema";
 
@@ -57,20 +58,19 @@ export async function PATCH(
     }
 
     const patch: Parameters<typeof updateProductoPg>[3] = {};
-    if (body.nombre !== undefined) patch.nombre = String(body.nombre).trim();
-    if (body.sku !== undefined) patch.sku = String(body.sku).trim();
+    if (body.nombre !== undefined) patch.nombre = normalizeUpperText(body.nombre);
+    if (body.sku !== undefined) patch.sku = normalizeUpperText(body.sku);
     if (body.costo_promedio !== undefined) patch.costo_promedio = Number(body.costo_promedio) || 0;
     if (body.precio_venta !== undefined) patch.precio_venta = Number(body.precio_venta) || 0;
     if (body.stock_actual !== undefined) patch.stock_actual = Number(body.stock_actual) || 0;
     if (body.stock_minimo !== undefined) patch.stock_minimo = Number(body.stock_minimo) || 0;
-    if (body.unidad_medida !== undefined) patch.unidad_medida = String(body.unidad_medida).trim() || "Unidad";
+    if (body.unidad_medida !== undefined) patch.unidad_medida = normalizeUpperText(body.unidad_medida) || "UNIDAD";
     if (body.metodo_valuacion !== undefined) {
       const mv = body.metodo_valuacion;
       patch.metodo_valuacion = mv === "FIFO" || mv === "LIFO" ? mv : "CPP";
     }
     if (body.codigo_barras !== undefined) {
-      const cb = body.codigo_barras != null ? String(body.codigo_barras).trim() : "";
-      patch.codigo_barras = cb || null;
+      patch.codigo_barras = normalizeUpperCodigoBarras(body.codigo_barras);
     }
     if (body.codigo_barras_interno !== undefined) {
       patch.codigo_barras_interno = body.codigo_barras_interno === true;

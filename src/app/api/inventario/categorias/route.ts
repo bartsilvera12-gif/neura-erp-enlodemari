@@ -7,6 +7,7 @@ import {
   listCategoriasProducto,
   insertCategoriaProducto,
 } from "@/lib/inventario/server/catalogos-pg";
+import { normalizeUpperText, normalizeUpperNullable } from "@/lib/text/normalize";
 
 export async function GET(request: NextRequest) {
   try {
@@ -29,13 +30,13 @@ export async function POST(request: NextRequest) {
     if (!ctx) return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
     const schema = await fetchDataSchemaForEmpresaId(ctx.auth.empresa_id);
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-    const nombre = String(body.nombre ?? "").trim();
+    const nombre = normalizeUpperText(body.nombre);
     if (!nombre) return NextResponse.json(errorResponse("El nombre es obligatorio."), { status: 400 });
     try {
       const row = await insertCategoriaProducto(schema, ctx.auth.empresa_id, {
         nombre,
-        codigo: body.codigo == null ? null : String(body.codigo),
-        descripcion: body.descripcion == null ? null : String(body.descripcion),
+        codigo: normalizeUpperNullable(body.codigo),
+        descripcion: normalizeUpperNullable(body.descripcion),
         parent_id: body.parent_id == null ? null : String(body.parent_id),
         activo: body.activo === false ? false : true,
       });

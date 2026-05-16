@@ -4,6 +4,7 @@ import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema"
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
 import { listUbicaciones, insertUbicacion } from "@/lib/inventario/server/catalogos-pg";
+import { normalizeUpperText, normalizeUpperNullable } from "@/lib/text/normalize";
 
 export async function GET(request: NextRequest) {
   try {
@@ -26,15 +27,15 @@ export async function POST(request: NextRequest) {
     if (!ctx) return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
     const schema = await fetchDataSchemaForEmpresaId(ctx.auth.empresa_id);
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-    const nombre = String(body.nombre ?? "").trim();
+    const nombre = normalizeUpperText(body.nombre);
     if (!nombre) return NextResponse.json(errorResponse("El nombre es obligatorio."), { status: 400 });
     try {
       const row = await insertUbicacion(schema, ctx.auth.empresa_id, {
         nombre,
-        codigo: body.codigo == null ? null : String(body.codigo),
+        codigo: normalizeUpperNullable(body.codigo),
         tipo: body.tipo == null ? "deposito" : String(body.tipo),
         parent_id: body.parent_id == null ? null : String(body.parent_id),
-        descripcion: body.descripcion == null ? null : String(body.descripcion),
+        descripcion: normalizeUpperNullable(body.descripcion),
         activo: body.activo === false ? false : true,
       });
       return NextResponse.json(successResponse({ ubicacion: row }));

@@ -9,6 +9,7 @@ import {
   rowToProductoApi,
   DuplicadoError,
 } from "@/lib/inventario/server/productos-pg";
+import { normalizeUpperText, normalizeUpperCodigoBarras } from "@/lib/text/normalize";
 import {
   setCategoriaPrincipal,
   setStockUbicacionInicial,
@@ -57,19 +58,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(errorResponse("JSON inválido."), { status: 400 });
     }
 
-    const nombre = String(body.nombre ?? "").trim();
-    const sku = String(body.sku ?? "").trim();
+    const nombre = normalizeUpperText(body.nombre);
+    const sku = normalizeUpperText(body.sku);
     if (!nombre) return NextResponse.json(errorResponse("El nombre es obligatorio."), { status: 400 });
     if (!sku) return NextResponse.json(errorResponse("El SKU es obligatorio."), { status: 400 });
 
-    const codigoBarrasRaw = body.codigo_barras != null ? String(body.codigo_barras).trim() : "";
-    const codigoBarras = codigoBarrasRaw || null;
+    const codigoBarras = normalizeUpperCodigoBarras(body.codigo_barras);
     const codigoBarrasInterno = codigoBarras != null && body.codigo_barras_interno === true;
     const stockActual = Number(body.stock_actual ?? 0) || 0;
     const costoPromedio = Number(body.costo_promedio ?? 0) || 0;
     const stockMinimo = Number(body.stock_minimo ?? 0) || 0;
     const precioVenta = Number(body.precio_venta ?? 0) || 0;
-    const unidadMedida = String(body.unidad_medida ?? "Unidad").trim() || "Unidad";
+    const unidadMedida = normalizeUpperText(body.unidad_medida) || "UNIDAD";
     const metodoValuacion =
       body.metodo_valuacion === "FIFO" || body.metodo_valuacion === "LIFO"
         ? (body.metodo_valuacion as "FIFO" | "LIFO")

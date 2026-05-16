@@ -72,39 +72,36 @@ export default function ProveedorForm({
     <div className="space-y-6 max-w-3xl">
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2">
-          <label className={labelClass}>Nombre / razón de uso *</label>
+          <label className={labelClass}>Razón social / Nombre del proveedor *</label>
           <input
-            className={inputClass}
+            className={`${inputClass} uppercase`}
             value={values.nombre}
             onChange={(e) => patch("nombre", e.target.value)}
+            placeholder="Ej: DISTRIBUIDORA EJEMPLO S.A."
             disabled={disabled}
             required
           />
+          <p className="mt-1 text-xs text-slate-400">
+            Se guarda en mayúsculas para unificar reportes.
+          </p>
         </div>
         <div>
-          <label className={labelClass}>Nombre comercial</label>
+          <label className={labelClass}>RUC</label>
           <input
-            className={inputClass}
-            value={values.nombre_comercial}
-            onChange={(e) => patch("nombre_comercial", e.target.value)}
-            disabled={disabled}
-          />
-        </div>
-        <div>
-          <label className={labelClass}>Razón social</label>
-          <input
-            className={inputClass}
-            value={values.razon_social}
-            onChange={(e) => patch("razon_social", e.target.value)}
-            disabled={disabled}
-          />
-        </div>
-        <div>
-          <label className={labelClass}>RUC / identificación</label>
-          <input
-            className={inputClass}
+            className={`${inputClass} uppercase`}
             value={values.ruc}
             onChange={(e) => patch("ruc", e.target.value)}
+            placeholder="Opcional"
+            disabled={disabled}
+          />
+        </div>
+        <div>
+          <label className={labelClass}>Nombre comercial (opcional)</label>
+          <input
+            className={`${inputClass} uppercase`}
+            value={values.nombre_comercial}
+            onChange={(e) => patch("nombre_comercial", e.target.value)}
+            placeholder="Si difiere del razón social"
             disabled={disabled}
           />
         </div>
@@ -130,7 +127,7 @@ export default function ProveedorForm({
         <div className="sm:col-span-2">
           <label className={labelClass}>Dirección</label>
           <input
-            className={inputClass}
+            className={`${inputClass} uppercase`}
             value={values.direccion}
             onChange={(e) => patch("direccion", e.target.value)}
             disabled={disabled}
@@ -139,7 +136,7 @@ export default function ProveedorForm({
         <div>
           <label className={labelClass}>Contacto principal</label>
           <input
-            className={inputClass}
+            className={`${inputClass} uppercase`}
             value={values.contacto}
             onChange={(e) => patch("contacto", e.target.value)}
             disabled={disabled}

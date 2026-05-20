@@ -141,9 +141,6 @@ export async function POST(request: NextRequest) {
       const cliTel = trim(pedidoRaw.cliente_telefono);
       const direccion = trim(pedidoRaw.direccion_entrega);
       const obs = trim(pedidoRaw.observacion);
-      if (m === "local" && mesa.length === 0) {
-        return NextResponse.json(errorResponse("Mesa requerida para modalidad En local."), { status: 400 });
-      }
       if (m === "delivery" && (cliTel.length === 0 || direccion.length === 0)) {
         return NextResponse.json(
           errorResponse("Teléfono y dirección requeridos para Delivery."),

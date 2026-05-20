@@ -245,9 +245,8 @@ export default function NuevaVentaPage() {
   const totalGeneral  = items.reduce((s, i) => s + i.total_linea, 0);
   const pedidoValido = (() => {
     if (modalidad === "") return false;
-    if (modalidad === "local") return pedidoMesa.trim().length > 0;
     if (modalidad === "delivery") return pedidoClienteTelefono.trim().length > 0 && pedidoDireccion.trim().length > 0;
-    return true; // carry_out: todos opcionales
+    return true; // local + carry_out: todos opcionales
   })();
   const ventaValida   = items.length > 0 && pedidoValido;
 
@@ -775,14 +774,12 @@ export default function NuevaVentaPage() {
             {modalidad === "local" && (
               <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    Número de mesa <span className="text-red-500">*</span>
-                  </label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Número de mesa</label>
                   <input
                     type="text"
                     value={pedidoMesa}
                     onChange={(e) => setPedidoMesa(e.target.value)}
-                    placeholder="Ej: 3"
+                    placeholder="Opcional — ej: 3"
                     className={inputClass}
                   />
                 </div>

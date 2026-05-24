@@ -505,8 +505,14 @@ export default function ProyectosKanbanClient() {
       </div>
 
       <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-        <div className="max-h-[calc(100vh-260px)] min-h-[520px] overflow-y-auto overflow-x-hidden rounded-xl pb-4">
-          <div className="flex min-h-full gap-2 w-full">
+        {/* Antes: "overflow-x-hidden" bloqueaba el scroll horizontal del kanban,
+            las columnas se comprimian a flex-1 y en mobile quedaban ilegibles
+            (texto de tarjetas cortado, no se ven todas las columnas).
+            Ahora: "overflow-auto" cubre X+Y, cada KanbanColumnView tiene
+            min-w-[260px] fijo (no flex-1), el contenedor crece con el contenido
+            y el usuario puede deslizar de izquierda a derecha. */}
+        <div className="max-h-[calc(100vh-260px)] min-h-[520px] overflow-auto rounded-xl pb-4 overscroll-x-contain">
+          <div className="flex min-h-full gap-2">
             {kanbanColumns.map((col) => {
               const items = byColumn.get(col.id) ?? [];
               return (
@@ -584,7 +590,11 @@ function KanbanColumnView({ col, children }: KanbanColumnViewProps) {
   return (
     <div
       ref={setNodeRef}
-      className={`flex min-w-[120px] flex-1 flex-col rounded-lg border bg-slate-50/80 transition-colors ${
+      // Antes: "min-w-[120px] flex-1" => columnas compartian el ancho disponible,
+      // imposibles de leer en mobile. Ahora: ancho fijo de 260px (sin flex-1)
+      // para que el contenedor scrollee horizontalmente con todas las columnas
+      // legibles. shrink-0 evita que se compriman.
+      className={`flex w-[260px] shrink-0 flex-col rounded-lg border bg-slate-50/80 transition-colors ${
         isOver && !col.inactiveFallback
           ? "border-indigo-300 bg-indigo-50/70 ring-2 ring-indigo-100"
           : "border-slate-200"

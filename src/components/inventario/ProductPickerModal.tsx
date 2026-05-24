@@ -161,7 +161,10 @@ export default function ProductPickerModal({
   // y pt-12 en sm+ donde si hay espacio para el aire decorativo.
   return (
     <div className="fixed inset-0 z-[100] flex items-start justify-center bg-slate-900/60 backdrop-blur-sm pt-3 sm:pt-12 px-2 sm:px-4" onClick={onClose}>
-      <div className="w-full max-w-6xl bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[94vh] sm:max-h-[88vh]" onClick={(e) => e.stopPropagation()}>
+      {/* dvh (dynamic viewport height) en lugar de vh: en iOS Safari el vh
+          incluye el espacio del URL bar/safe-area y el modal queda parcialmente
+          oculto debajo del browser chrome. dvh devuelve el viewport REAL visible. */}
+      <div className="w-full max-w-6xl bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[94dvh] sm:max-h-[88vh]" onClick={(e) => e.stopPropagation()}>
         {/* Header con buscador */}
         <div className="p-4 border-b border-slate-200">
           <div className="flex items-center gap-3">
@@ -262,28 +265,38 @@ export default function ProductPickerModal({
             )}
           </div>
 
-          {/* PANEL DETALLE */}
-          <div className={`${sel ? "flex" : "hidden lg:flex"} w-full lg:w-2/5 flex-col overflow-y-auto bg-slate-50`}>
+          {/* PANEL DETALLE
+              Layout flex column:
+                - Header sticky: boton Volver (mobile only).
+                - Middle scrollable: imagen + info + form inputs.
+                - Footer sticky: boton "+ Agregar a la venta" SIEMPRE visible.
+              Antes el boton estaba al final del scroll => en mobile chico el user
+              no llegaba a verlo, no podia confirmar el producto. */}
+          <div className={`${sel ? "flex" : "hidden lg:flex"} w-full lg:w-2/5 flex-col bg-slate-50 min-h-0`}>
             {!sel ? (
               <div className="flex-1 flex items-center justify-center text-sm text-slate-400 p-6 text-center">
                 Seleccioná un producto de la lista para ver detalle y agregar a la venta.
               </div>
             ) : (
-              <div className="p-5 space-y-4">
-                {/* Boton "Volver a la lista" — solo mobile (en desktop la lista esta al lado).
-                    Tap target 40x40px. */}
-                <button
-                  type="button"
-                  onClick={() => setSel(null)}
-                  className="lg:hidden inline-flex items-center gap-1.5 -ml-1 min-h-[40px] px-2 rounded-md text-sm font-medium text-slate-600 hover:bg-slate-200/60 hover:text-slate-900 transition-colors"
-                  aria-label="Volver a la lista de productos"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                    <path fillRule="evenodd" d="M12.78 5.22a.75.75 0 0 1 0 1.06L9.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
-                  </svg>
-                  Volver a la lista
-                </button>
-                <div className="w-full h-44 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden">
+              <>
+                {/* Mobile back button — sticky en el tope del panel */}
+                <div className="lg:hidden shrink-0 border-b border-slate-200 bg-slate-50 px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => setSel(null)}
+                    className="inline-flex items-center gap-1.5 min-h-[40px] px-2 rounded-md text-sm font-medium text-slate-700 hover:bg-slate-200/60 hover:text-slate-900 transition-colors"
+                    aria-label="Volver a la lista de productos"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                      <path fillRule="evenodd" d="M12.78 5.22a.75.75 0 0 1 0 1.06L9.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
+                    </svg>
+                    Volver a la lista
+                  </button>
+                </div>
+                {/* Middle: scrollable. flex-1 + overflow-y-auto + min-h-0
+                    para que el footer no se aplaste. */}
+                <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3 sm:space-y-4 min-h-0">
+                <div className="w-full h-28 sm:h-44 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden">
                   {sel.imagen_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={sel.imagen_url} alt={sel.nombre} className="w-full h-full object-contain" />
@@ -364,16 +377,20 @@ export default function ProductPickerModal({
                     <div className="flex justify-between"><span>IVA</span><span className="tabular-nums">{ivaMonto > 0 ? formatGs(ivaMonto) : "—"}</span></div>
                     <div className="flex justify-between font-bold text-slate-800 pt-1 border-t border-slate-200"><span>Total línea</span><span className="tabular-nums">{formatGs(subtotal + ivaMonto)}</span></div>
                   </div>
-
+                </div>
+                </div>
+                {/* Footer sticky con el boton de accion principal.
+                    Siempre visible al final del panel, no requiere scroll. */}
+                <div className="shrink-0 border-t border-slate-200 bg-white p-3 sm:p-4">
                   <button
                     type="button"
                     onClick={handleAgregar}
-                    className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold py-2.5 rounded-lg"
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-sm font-semibold py-3 min-h-[48px] rounded-lg shadow-sm transition-colors"
                   >
                     + Agregar a la venta
                   </button>
                 </div>
-              </div>
+              </>
             )}
           </div>
         </div>

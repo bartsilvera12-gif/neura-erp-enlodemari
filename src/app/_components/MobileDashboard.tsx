@@ -104,15 +104,18 @@ function getRangoFechas(periodo: Periodo): { desde: Date; hasta: Date } {
   }
 }
 
+/**
+ * Formato de monto guaraní con separadores de miles.
+ * Ej: 268000 -> "Gs. 268.000"
+ *     1250000 -> "Gs. 1.250.000"
+ *
+ * Antes habia dos funciones: formatGs (completo) y formatGsCompact (K/M/MM).
+ * El usuario prefiere ver el numero real ("268.000" en vez de "268 K"),
+ * asi que solo dejamos la version completa. Si en el futuro algun monto se
+ * desborda en mobile (ej: > 1.000.000.000), evaluar truncar con CSS o
+ * reintroducir el compact selectivamente.
+ */
 function formatGs(n: number): string {
-  return `Gs. ${Math.round(n).toLocaleString("es-PY")}`;
-}
-
-function formatGsCompact(n: number): string {
-  const abs = Math.abs(n);
-  if (abs >= 1_000_000_000) return `Gs. ${(n / 1_000_000_000).toFixed(1)} MM`;
-  if (abs >= 1_000_000) return `Gs. ${(n / 1_000_000).toFixed(1)} M`;
-  if (abs >= 1_000) return `Gs. ${(n / 1_000).toFixed(0)} K`;
   return `Gs. ${Math.round(n).toLocaleString("es-PY")}`;
 }
 
@@ -391,7 +394,7 @@ export default function MobileDashboard({
           Ventas {PERIODO_LABELS[periodo].toLowerCase()}
         </p>
         <p className="text-3xl font-bold tabular-nums leading-tight">
-          {formatGsCompact(metrics.totalVentas)}
+          {formatGs(metrics.totalVentas)}
         </p>
         <p className="text-xs opacity-90 mt-1">
           {metrics.cantidadVentas} venta{metrics.cantidadVentas === 1 ? "" : "s"}
@@ -407,8 +410,8 @@ export default function MobileDashboard({
               Cobrado
             </p>
           </div>
-          <p className="text-lg font-bold text-slate-900 tabular-nums">
-            {formatGsCompact(metrics.cobrado)}
+          <p className="text-base sm:text-lg font-bold text-slate-900 tabular-nums break-all leading-tight">
+            {formatGs(metrics.cobrado)}
           </p>
           <p className="text-[11px] text-slate-500 mt-0.5">
             {metrics.cantidadPagos} pago{metrics.cantidadPagos === 1 ? "" : "s"}
@@ -421,8 +424,8 @@ export default function MobileDashboard({
               Gastos
             </p>
           </div>
-          <p className="text-lg font-bold text-slate-900 tabular-nums">
-            {formatGsCompact(metrics.totalGastos)}
+          <p className="text-base sm:text-lg font-bold text-slate-900 tabular-nums break-all leading-tight">
+            {formatGs(metrics.totalGastos)}
           </p>
           <p className="text-[11px] text-slate-500 mt-0.5">del período</p>
         </div>
@@ -543,7 +546,7 @@ export default function MobileDashboard({
                     </p>
                   </div>
                   <p className="text-sm font-bold text-slate-900 tabular-nums shrink-0">
-                    {formatGsCompact(Number(v.total) || 0)}
+                    {formatGs(Number(v.total) || 0)}
                   </p>
                 </div>
               </div>
@@ -578,8 +581,8 @@ export default function MobileDashboard({
           <p className="text-[10px] font-bold uppercase tracking-widest opacity-90 mb-2">
             Cartera pendiente del período
           </p>
-          <p className="text-3xl font-bold tabular-nums leading-tight">
-            {formatGsCompact(financieroMetrics.carteraPendiente)}
+          <p className="text-2xl sm:text-3xl font-bold tabular-nums leading-tight break-all">
+            {formatGs(financieroMetrics.carteraPendiente)}
           </p>
           <p className="text-xs opacity-90 mt-1">
             Saldo vivo de facturas emitidas {PERIODO_LABELS[periodo].toLowerCase()}
@@ -590,8 +593,8 @@ export default function MobileDashboard({
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Facturado</p>
-            <p className="text-lg font-bold text-slate-900 tabular-nums">
-              {formatGsCompact(financieroMetrics.facturadoCohort)}
+            <p className="text-base sm:text-lg font-bold text-slate-900 tabular-nums break-all leading-tight">
+              {formatGs(financieroMetrics.facturadoCohort)}
             </p>
             <p className="text-[11px] text-slate-500 mt-0.5">cohorte fiscal</p>
           </div>
@@ -600,8 +603,8 @@ export default function MobileDashboard({
               <TrendingUp className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Recaudado</p>
             </div>
-            <p className="text-lg font-bold text-slate-900 tabular-nums">
-              {formatGsCompact(financieroMetrics.recaudado)}
+            <p className="text-base sm:text-lg font-bold text-slate-900 tabular-nums break-all leading-tight">
+              {formatGs(financieroMetrics.recaudado)}
             </p>
             <p className="text-[11px] text-slate-500 mt-0.5">
               {financieroMetrics.pctCobranza.toFixed(1)}% del cohorte
@@ -693,7 +696,7 @@ export default function MobileDashboard({
                     <p className="text-sm font-medium text-slate-900 truncate">{d.nombre}</p>
                   </div>
                   <p className="text-sm font-bold text-amber-700 tabular-nums shrink-0">
-                    {formatGsCompact(d.saldo)}
+                    {formatGs(d.saldo)}
                   </p>
                 </Link>
               ))}
@@ -711,8 +714,8 @@ export default function MobileDashboard({
           <p className="text-[10px] font-bold uppercase tracking-widest opacity-90 mb-2">
             Valor total del inventario
           </p>
-          <p className="text-3xl font-bold tabular-nums leading-tight">
-            {formatGsCompact(inventarioMetrics.valorTotal)}
+          <p className="text-2xl sm:text-3xl font-bold tabular-nums leading-tight break-all">
+            {formatGs(inventarioMetrics.valorTotal)}
           </p>
           <p className="text-xs opacity-90 mt-1">
             {inventarioMetrics.totalProductos} productos ·{" "}

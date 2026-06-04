@@ -7,11 +7,24 @@ import { FancySelect } from "@/components/ui/FancySelect";
 import MobileFab from "@/components/ui/MobileFab";
 import { getVentas } from "@/lib/ventas/storage";
 import type { Venta, TipoVenta, TipoIvaVenta } from "@/lib/ventas/types";
+import { sectoresParaTicket } from "@/lib/ventas/sector-tickets";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function formatGs(valor: number) {
   return `Gs. ${Math.round(valor).toLocaleString("es-PY")}`;
+}
+
+/**
+ * Abre una pestaña de impresión INDEPENDIENTE por copia: Cliente siempre, y
+ * Pizzería / Plancha según los sectores presentes en la venta. Cada pestaña
+ * auto-imprime (auto=1). Se llama desde el click del usuario (gesto válido),
+ * por eso el navegador permite abrir varias pestañas a la vez.
+ */
+function abrirTicketsVenta(v: Venta) {
+  for (const copia of sectoresParaTicket(v.items)) {
+    window.open(`/api/ventas/${v.id}/ticket?copia=${copia}&auto=1`, "_blank", "noopener");
+  }
 }
 
 function formatFecha(iso: string) {
@@ -377,15 +390,14 @@ export default function VentasPage() {
                         {formatFecha(v.fecha)}
                       </td>
                       <td className="py-4 text-center align-middle">
-                        <a
-                          href={`/api/ventas/${v.id}/ticket?mode=comandas`}
-                          target="_blank"
-                          rel="noopener"
+                        <button
+                          type="button"
+                          onClick={() => abrirTicketsVenta(v)}
                           className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50 transition-colors"
-                          title="Abrir comandas + ticket cliente"
+                          title="Abrir Cliente + Pizzería + Plancha en pestañas separadas"
                         >
                           Imprimir
-                        </a>
+                        </button>
                       </td>
                     </tr>
                   );

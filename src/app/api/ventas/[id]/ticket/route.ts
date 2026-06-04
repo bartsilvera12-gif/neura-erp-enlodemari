@@ -2,17 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
 
 /**
- * GET /api/ventas/[id]/ticket?w=58|80&mode=comandas&auto=1
+ * GET /api/ventas/[id]/ticket?w=58|80&mode=comandas&copia=cliente|pizzeria|plancha&auto=1
  *
- * HTML imprimible NO FISCAL. Soporta dos modos:
+ * HTML imprimible NO FISCAL. Soporta tres modos:
  *
- * - Default (sin `mode`): una sola copia tipo CLIENTE.
+ * - `copia=cliente|pizzeria|plancha`: UNA sola copia del tipo pedido. Lo usa el
+ *   frontend para abrir una pestaña de impresión independiente por sector
+ *   (Cliente / Pizzería / Plancha).
  * - `mode=comandas`: genera múltiples copias en una sola página HTML separadas por
  *   page-break-after, calculadas automáticamente según las categorías/SKUs de los
- *   productos de la venta:
+ *   productos de la venta (se mantiene por compatibilidad):
  *     · Siempre: copia CLIENTE (con precios, total, método de pago, leyenda no fiscal).
  *     · Si hay pizzas/lompizzas: copia COMANDA PIZZERÍA (sin precios).
  *     · Si hay hamburguesas/lomitos/lomitos árabes/panchos/papas/especiales: copia COMANDA PLANCHA.
+ * - Default (sin `mode` ni `copia`): una sola copia tipo CLIENTE.
  *
  * No toca SIFEN, no genera XML, no usa timbrado.
  */
@@ -241,6 +244,11 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
   const widthMm = wParam === "58" ? 58 : 80;
   const fontPx = widthMm === 58 ? 11 : 12;
   const modeComandas = url.searchParams.get("mode") === "comandas";
+  const copiaParam = url.searchParams.get("copia");
+  const copiaUnica: "cliente" | "pizzeria" | "plancha" | null =
+    copiaParam === "cliente" || copiaParam === "pizzeria" || copiaParam === "plancha"
+      ? copiaParam
+      : null;
 
   const ctx = await getTenantSupabaseFromAuth(request);
   if (!ctx) return new NextResponse("No autorizado", { status: 401 });
@@ -338,10 +346,16 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
   const hayPizzeria = items.some((i) => i.sector === "pizzeria");
   const hayPlancha = items.some((i) => i.sector === "plancha");
 
-  const copias: Array<"cliente" | "pizzeria" | "plancha"> = ["cliente"];
-  if (modeComandas) {
+  let copias: Array<"cliente" | "pizzeria" | "plancha">;
+  if (copiaUnica) {
+    // Una sola copia pedida explícitamente (una pestaña por sector).
+    copias = [copiaUnica];
+  } else if (modeComandas) {
+    copias = ["cliente"];
     if (hayPizzeria) copias.push("pizzeria");
     if (hayPlancha) copias.push("plancha");
+  } else {
+    copias = ["cliente"];
   }
 
   const seccionesHtml = copias
@@ -396,7 +410,7 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
   ${seccionesHtml}
   <div class="actions">
     <button type="button" onclick="window.print()">Imprimir</button>
-    <a href="?${modeComandas ? "mode=comandas&" : ""}w=${widthMm === 80 ? 58 : 80}">Cambiar a ${widthMm === 80 ? 58 : 80}mm</a>
+    <a href="?${copiaUnica ? `copia=${copiaUnica}&` : modeComandas ? "mode=comandas&" : ""}w=${widthMm === 80 ? 58 : 80}">Cambiar a ${widthMm === 80 ? 58 : 80}mm</a>
   </div>
   <script>
     try {

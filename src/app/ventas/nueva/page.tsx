@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import MontoInput from "@/components/ui/MontoInput";
 import ProductPickerModal, { type ProductoPickerItem, type AgregarVentaPayload } from "@/components/inventario/ProductPickerModal";
 import { saveVenta } from "@/lib/ventas/storage";
+import { sectoresParaTicket } from "@/lib/ventas/sector-tickets";
 import { getProductos } from "@/lib/inventario/storage";
 import type { TipoIvaVenta, TipoVenta, MonedaVenta, LineaVenta, MetodoPago } from "@/lib/ventas/types";
 import type { Producto } from "@/lib/inventario/types";
@@ -360,6 +361,14 @@ export default function NuevaVentaPage() {
     setErrorVenta(null);
     if (!ventaValida) return;
 
+    // Pre-abrimos una pestaña en blanco por cada copia (Cliente / Pizzería /
+    // Plancha) ANTES del await, mientras todavía hay gesto del usuario: así el
+    // navegador no bloquea la apertura de varias pestañas. Luego las redirigimos.
+    const copiasTicket = sectoresParaTicket(items);
+    const ventanasTicket = copiasTicket.map(() => {
+      try { return window.open("about:blank", "_blank"); } catch { return null; }
+    });
+
     const resultado = await saveVenta(
       {
         items,
@@ -384,13 +393,21 @@ export default function NuevaVentaPage() {
     );
 
     if (!resultado.success) {
+      // Cerramos las pestañas que abrimos optimistamente si la venta no se guardó.
+      ventanasTicket.forEach((w) => { try { w?.close(); } catch {} });
       setErrorVenta(resultado.error);
       return;
     }
-    // Abrir comandas + ticket cliente en nueva pestaña con autoprint.
-    try {
-      window.open(`/api/ventas/${resultado.venta.id}/ticket?mode=comandas&auto=1`, "_blank", "noopener");
-    } catch {}
+    // Apuntar cada pestaña pre-abierta a su copia, con auto-impresión.
+    const ventaId = resultado.venta.id;
+    copiasTicket.forEach((copia, i) => {
+      const href = `/api/ventas/${ventaId}/ticket?copia=${copia}&auto=1`;
+      const w = ventanasTicket[i];
+      try {
+        if (w) w.location.href = href;
+        else window.open(href, "_blank", "noopener"); // fallback si el pre-open falló
+      } catch {}
+    });
     router.push("/ventas");
   }
 

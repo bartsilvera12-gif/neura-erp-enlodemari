@@ -266,5 +266,30 @@ body {
     #F8FAFC;
 }
 
+/* =============================================================================
+   Tablet / touch — targets táctiles cómodos (Redmi Pad 2 y tablets 11").
+   Se aplica SOLO en dispositivos de puntero grueso: @media (pointer: coarse).
+   - Desktop con mouse = pointer:fine → NO afectado (cumple "no romper desktop").
+   - Mobile/tablet (touch) → gana área de toque sin cambiar el diseño.
+   Solo usa min-height (eje vertical): no puede introducir overflow horizontal,
+   por eso es seguro respecto a los breakpoints actuales.
+   ============================================================================= */
+@media (pointer: coarse) {
+  /* Botones de acción dentro de tablas (Imprimir, Editar, etc.). min-height
+     solo surte efecto en botones/inline-flex (el patrón de estos controles);
+     en <a> inline planos es un no-op, así que no altera otros layouts. */
+  :where(table td, table th) :is(button, a) {
+    min-height: 38px;
+  }
+  /* Controles compactos marcados explícitamente (ej. chips de período del
+     dashboard). Centra el contenido manteniendo el estilo visual actual. */
+  .tap-comfort {
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
 
 

@@ -2230,7 +2230,7 @@ export default function DashboardPage() {
                 key={p.id}
                 type="button"
                 onClick={() => setPeriodo(p.id)}
-                className="rounded-lg px-3 py-2 text-xs font-medium transition-all"
+                className="tap-comfort rounded-lg px-3 py-2 text-xs font-medium transition-all"
                 style={
                   periodo === p.id
                     ? { backgroundColor: Z.accent, color: Z.text }

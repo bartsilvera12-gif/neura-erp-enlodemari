@@ -22,8 +22,13 @@ function formatGs(valor: number) {
  * por eso el navegador permite abrir varias pestañas a la vez.
  */
 function abrirTicketsVenta(v: Venta) {
+  // Una PESTAÑA por copia (Cliente / Pizzería / Plancha). Sin el 3er argumento de
+  // "features": con él, el navegador intenta abrir una *ventana popup* en vez de
+  // una pestaña, y Android/Chrome bloquea las popups mucho más agresivamente. Como
+  // pestaña plana es lo menos bloqueado. Aun así, en tablet hay que permitir
+  // "pop-ups y redirecciones" para el sitio para que se abran las 3 a la vez.
   for (const copia of sectoresParaTicket(v.items)) {
-    window.open(`/api/ventas/${v.id}/ticket?copia=${copia}&auto=1`, "_blank", "noopener");
+    window.open(`/api/ventas/${v.id}/ticket?copia=${copia}&auto=1`, "_blank");
   }
 }
 

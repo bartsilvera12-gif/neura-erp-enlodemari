@@ -1,14 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
+import {
+  normalizeComandaData,
+  buildComandaTicketText,
+  buildComandaEscPosPayload,
+  type ComandaInput,
+  type TicketCopia,
+} from "@/lib/printing/thermal-ticket";
 
 /**
- * GET /api/ventas/[id]/ticket?w=58|80&mode=comandas&copia=cliente|pizzeria|plancha&auto=1
+ * GET /api/ventas/[id]/ticket?w=58|80&mode=comandas&copia=cliente|pizzeria|plancha|cocina&auto=1
  *
- * HTML imprimible NO FISCAL. Soporta tres modos:
+ * HTML imprimible NO FISCAL. Soporta tres modos + salida texto/ESC-POS:
  *
- * - `copia=cliente|pizzeria|plancha`: UNA sola copia del tipo pedido. Lo usa el
+ * - `copia=cliente|pizzeria|plancha|cocina`: UNA sola copia del tipo pedido. Lo usa el
  *   frontend para abrir una pestaña de impresión independiente por sector
- *   (Cliente / Pizzería / Plancha).
+ *   (Cliente / Pizzería / Plancha). `cocina` = comanda genérica (sin precios) para
+ *   ventas sin sector clasificado (ej. sólo bebidas).
+ * - `showTotal=1`: en copias de cocina, muestra el TOTAL (por defecto cocina va sin total).
+ * - `format=text` | `format=escpos` (o `escpos=1`): payload de texto plano monoespaciado
+ *   (base impresora térmica autocortante). `escpos` añade INIT + corte parcial.
  * - `mode=comandas`: genera múltiples copias en una sola página HTML separadas por
  *   page-break-after, calculadas automáticamente según las categorías/SKUs de los
  *   productos de la venta (se mantiene por compatibilidad):
@@ -144,16 +155,22 @@ interface PedidoBrief {
 // ── Render de cada copia ───────────────────────────────────────────────────
 
 function renderCopia(opts: {
-  tipo: "cliente" | "pizzeria" | "plancha";
+  tipo: "cliente" | "pizzeria" | "plancha" | "cocina";
   venta: VentaRow;
   items: EnrichedItem[];
   brief: PedidoBrief | null;
   fontPx: number;
   isLast: boolean;
+  showTotalCocina?: boolean;
 }): string {
   const { tipo, venta, items, brief, fontPx, isLast } = opts;
   const showPrices = tipo === "cliente";
-  const sectorBadge = tipo === "pizzeria" ? "COMANDA PIZZERÍA" : tipo === "plancha" ? "COMANDA PLANCHA" : "";
+  const showTotalCocina = opts.showTotalCocina === true && tipo !== "cliente";
+  const sectorBadge =
+    tipo === "pizzeria" ? "COMANDA PIZZERÍA"
+    : tipo === "plancha" ? "COMANDA PLANCHA"
+    : tipo === "cocina" ? "COMANDA COCINA"
+    : "";
   const modalidad = modalidadLabel(brief?.modalidad);
 
   // Filas de ítems: en cliente todas; en cocina todas también, pero las del propio sector destacadas.
@@ -165,7 +182,7 @@ function renderCopia(opts: {
       const matchesSector =
         (tipo === "pizzeria" && it.sector === "pizzeria") ||
         (tipo === "plancha" && it.sector === "plancha");
-      const cls = matchesSector ? "match" : tipo === "cliente" ? "" : "muted";
+      const cls = matchesSector ? "match" : tipo === "cliente" || tipo === "cocina" ? "" : "muted";
       const main = showPrices
         ? `<tr class="${cls}">
              <td class="qty"><strong>${cant}×</strong></td>
@@ -209,6 +226,13 @@ function renderCopia(opts: {
            <tr><td class="lbl">Pago</td><td class="val">${metodoPagoLabel(venta.metodo_pago)}</td></tr>
          </tbody>
        </table>`
+    : showTotalCocina
+    ? `<hr>
+       <table class="totales">
+         <tbody>
+           <tr class="total-row"><td class="lbl">TOTAL</td><td class="val">${formatGs(total)}</td></tr>
+         </tbody>
+       </table>`
     : "";
   const footerHtml = showPrices
     ? `<hr>
@@ -245,10 +269,16 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
   const fontPx = widthMm === 58 ? 11 : 12;
   const modeComandas = url.searchParams.get("mode") === "comandas";
   const copiaParam = url.searchParams.get("copia");
-  const copiaUnica: "cliente" | "pizzeria" | "plancha" | null =
-    copiaParam === "cliente" || copiaParam === "pizzeria" || copiaParam === "plancha"
+  const copiaUnica: "cliente" | "pizzeria" | "plancha" | "cocina" | null =
+    copiaParam === "cliente" || copiaParam === "pizzeria" || copiaParam === "plancha" || copiaParam === "cocina"
       ? copiaParam
       : null;
+  // showTotal=1 → la copia de cocina muestra el TOTAL (por defecto sin precios ni total).
+  const showTotalCocina = url.searchParams.get("showTotal") === "1";
+  // format=text|escpos → payload plano monoespaciado (base ESC/POS). escpos añade INIT+corte.
+  const format = url.searchParams.get("format");
+  const wantsText = format === "text" || format === "escpos";
+  const wantsEscpos = format === "escpos" || url.searchParams.get("escpos") === "1";
 
   const ctx = await getTenantSupabaseFromAuth(request);
   if (!ctx) return new NextResponse("No autorizado", { status: 401 });
@@ -346,7 +376,7 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
   const hayPizzeria = items.some((i) => i.sector === "pizzeria");
   const hayPlancha = items.some((i) => i.sector === "plancha");
 
-  let copias: Array<"cliente" | "pizzeria" | "plancha">;
+  let copias: Array<"cliente" | "pizzeria" | "plancha" | "cocina">;
   if (copiaUnica) {
     // Una sola copia pedida explícitamente (una pestaña por sector).
     copias = [copiaUnica];
@@ -358,9 +388,54 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
     copias = ["cliente"];
   }
 
+  // ── Salida texto plano / ESC-POS (preparación impresora térmica autocortante) ──
+  if (wantsText) {
+    const comandaInput: ComandaInput = {
+      negocio: NEGOCIO,
+      numero: venta.numero_control,
+      fechaIso: venta.fecha,
+      modalidad: brief?.modalidad ?? null,
+      mesa: brief?.mesa ?? null,
+      cliente_nombre: brief?.cliente_nombre ?? null,
+      cliente_telefono: brief?.cliente_telefono ?? null,
+      direccion_entrega: brief?.direccion_entrega ?? null,
+      observacion_general: brief?.observacion ?? venta.observaciones ?? null,
+      estado: null,
+      metodo_pago: venta.metodo_pago,
+      subtotal: Number(venta.subtotal),
+      monto_iva: Number(venta.monto_iva),
+      total: Number(venta.total),
+      items: items.map((it) => ({
+        cantidad: Number(it.cantidad),
+        nombre: it.producto_nombre,
+        precio_unitario: Number(it.precio_venta),
+        total_linea: Number(it.total_linea),
+        sector: it.sector,
+      })),
+    };
+    const normalized = normalizeComandaData(comandaInput);
+    const widthChars = widthMm === 58 ? 32 : 48;
+    const builder = wantsEscpos ? buildComandaEscPosPayload : buildComandaTicketText;
+    const payload = (copias as TicketCopia[])
+      .map((copia) => builder(normalized, { copia, widthChars, showTotal: showTotalCocina }))
+      .join(wantsEscpos ? "" : `\n${"-".repeat(widthChars)}\n\n`);
+    return new NextResponse(payload, {
+      status: 200,
+      headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+    });
+  }
+
   const seccionesHtml = copias
     .map((tipo, idx) =>
-      renderCopia({ tipo, venta, items, brief, fontPx, isLast: idx === copias.length - 1 })
+      renderCopia({
+        tipo,
+        venta,
+        items,
+        brief,
+        fontPx,
+        isLast: idx === copias.length - 1,
+        showTotalCocina,
+      })
     )
     .join("");
 

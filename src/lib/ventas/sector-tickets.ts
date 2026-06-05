@@ -33,3 +33,21 @@ export function sectoresParaTicket(items: ReadonlyArray<{ sku: string }>): Copia
   if (hayPlancha) copias.push("plancha");
   return copias;
 }
+
+/** Copia de cocina para el sector. "cocina" = genérica cuando no hay sector clasificado. */
+export type CopiaCocina = "pizzeria" | "plancha" | "cocina";
+
+/**
+ * Sólo las copias de COCINA (sin ticket cliente), para el botón "Comanda cocina".
+ * Si la venta no tiene ítems de pizzería ni plancha (ej. sólo bebidas), devuelve
+ * una comanda genérica "cocina" para que igual salga el pedido a cocina.
+ */
+export function sectoresCocinaParaComanda(
+  items: ReadonlyArray<{ sku: string }>
+): CopiaCocina[] {
+  const copias: CopiaCocina[] = [];
+  if (items.some((i) => classifyBySku(i.sku) === "pizzeria")) copias.push("pizzeria");
+  if (items.some((i) => classifyBySku(i.sku) === "plancha")) copias.push("plancha");
+  if (copias.length === 0) copias.push("cocina");
+  return copias;
+}

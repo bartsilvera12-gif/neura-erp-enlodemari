@@ -7,7 +7,7 @@ import { FancySelect } from "@/components/ui/FancySelect";
 import MobileFab from "@/components/ui/MobileFab";
 import { getVentas } from "@/lib/ventas/storage";
 import type { Venta, TipoVenta, TipoIvaVenta } from "@/lib/ventas/types";
-import { sectoresParaTicket } from "@/lib/ventas/sector-tickets";
+import { sectoresParaTicket, sectoresCocinaParaComanda } from "@/lib/ventas/sector-tickets";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -40,6 +40,26 @@ function abrirTicketsVenta(v: Venta) {
     try {
       if (w) w.location.href = href;
       else window.open(href, "_blank"); // fallback si el pre-open falló
+    } catch {}
+  });
+}
+
+/**
+ * Reimprime SÓLO la comanda de cocina (sin ticket cliente). Una pestaña por sector
+ * (Pizzería / Plancha) o una genérica "Cocina" si la venta no tiene sector clasificado.
+ * Mismo patrón robusto de pre-apertura de pestañas dentro del gesto del usuario.
+ */
+function abrirComandaCocina(v: Venta) {
+  const copias = sectoresCocinaParaComanda(v.items);
+  const ventanas = copias.map(() => {
+    try { return window.open("about:blank", "_blank"); } catch { return null; }
+  });
+  copias.forEach((copia, i) => {
+    const href = `/api/ventas/${v.id}/ticket?copia=${copia}&auto=1`;
+    const w = ventanas[i];
+    try {
+      if (w) w.location.href = href;
+      else window.open(href, "_blank");
     } catch {}
   });
 }
@@ -407,14 +427,24 @@ export default function VentasPage() {
                         {formatFecha(v.fecha)}
                       </td>
                       <td className="py-4 text-center align-middle">
-                        <button
-                          type="button"
-                          onClick={() => abrirTicketsVenta(v)}
-                          className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50 transition-colors"
-                          title="Abrir Cliente + Pizzería + Plancha en pestañas separadas"
-                        >
-                          Imprimir
-                        </button>
+                        <div className="inline-flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => abrirTicketsVenta(v)}
+                            className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50 transition-colors"
+                            title="Abrir Cliente + Pizzería + Plancha en pestañas separadas"
+                          >
+                            Imprimir
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => abrirComandaCocina(v)}
+                            className="inline-flex items-center justify-center rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 hover:border-amber-300 hover:bg-amber-100 transition-colors"
+                            title="Reimprimir sólo la comanda de cocina (sin ticket cliente)"
+                          >
+                            Comanda cocina
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

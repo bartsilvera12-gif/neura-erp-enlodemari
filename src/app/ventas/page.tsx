@@ -22,14 +22,26 @@ function formatGs(valor: number) {
  * por eso el navegador permite abrir varias pestañas a la vez.
  */
 function abrirTicketsVenta(v: Venta) {
-  // Una PESTAÑA por copia (Cliente / Pizzería / Plancha). Sin el 3er argumento de
-  // "features": con él, el navegador intenta abrir una *ventana popup* en vez de
-  // una pestaña, y Android/Chrome bloquea las popups mucho más agresivamente. Como
-  // pestaña plana es lo menos bloqueado. Aun así, en tablet hay que permitir
-  // "pop-ups y redirecciones" para el sitio para que se abran las 3 a la vez.
-  for (const copia of sectoresParaTicket(v.items)) {
-    window.open(`/api/ventas/${v.id}/ticket?copia=${copia}&auto=1`, "_blank");
-  }
+  // Una PESTAÑA por copia (Cliente / Pizzería / Plancha). Mismo patrón robusto que
+  // "Nueva venta": pre-abrimos TODAS las pestañas en blanco de un saque, dentro del
+  // mismo gesto del usuario, ANTES de navegar ninguna. Si abriéramos cada una con su
+  // URL final directo, la 1ª pestaña navega + auto-imprime al instante y ese efecto
+  // corta el gesto, bloqueando la 2ª y 3ª (se ve sobre todo en tablet/Android).
+  // Luego le asignamos la URL a cada ventana ya reservada.
+  // Sin el 3er arg de "features": con él el navegador abre una *popup* (más bloqueada)
+  // en vez de una pestaña. Aun así, en Android hay que permitir pop-ups del sitio.
+  const copias = sectoresParaTicket(v.items);
+  const ventanas = copias.map(() => {
+    try { return window.open("about:blank", "_blank"); } catch { return null; }
+  });
+  copias.forEach((copia, i) => {
+    const href = `/api/ventas/${v.id}/ticket?copia=${copia}&auto=1`;
+    const w = ventanas[i];
+    try {
+      if (w) w.location.href = href;
+      else window.open(href, "_blank"); // fallback si el pre-open falló
+    } catch {}
+  });
 }
 
 function formatFecha(iso: string) {

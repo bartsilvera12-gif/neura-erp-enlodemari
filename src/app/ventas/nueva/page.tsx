@@ -117,7 +117,9 @@ export default function NuevaVentaPage() {
   const comboContainerRef = useRef<HTMLDivElement>(null);
 
   // ── Modal buscador (F3) ────────────────────────────────────────────────────
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // Arranca abierto: al entrar a "Nueva venta" el cajero ve directo el buscador
+  // de productos, sin un clic extra sobre el campo. Mejor experiencia en caja.
+  const [pickerOpen, setPickerOpen] = useState(true);
 
   function pickerToProducto(p: ProductoPickerItem): Producto {
     return {
@@ -245,11 +247,9 @@ export default function NuevaVentaPage() {
   const totalSubtotal = items.reduce((s, i) => s + i.subtotal, 0);
   const totalIva      = items.reduce((s, i) => s + i.monto_iva, 0);
   const totalGeneral  = items.reduce((s, i) => s + i.total_linea, 0);
-  const pedidoValido = (() => {
-    if (modalidad === "") return false;
-    if (modalidad === "delivery") return pedidoClienteTelefono.trim().length > 0 && pedidoDireccion.trim().length > 0;
-    return true; // local + carry_out: todos opcionales
-  })();
+  // Solo la modalidad es obligatoria; los datos de cada modalidad (mesa,
+  // teléfono, dirección, etc.) son opcionales para no frenar el cobro en caja.
+  const pedidoValido = modalidad !== "";
   const ventaValida   = items.length > 0 && pedidoValido;
 
   // Vuelto (solo informativo, no se persiste)
@@ -380,16 +380,15 @@ export default function NuevaVentaPage() {
         tipo_venta:   tipoVenta,
         metodo_pago:  metodoPago,
       },
-      modalidad === ""
-        ? undefined
-        : {
-            modalidad,
-            mesa: modalidad === "local" ? pedidoMesa.trim() || null : null,
-            cliente_nombre: pedidoClienteNombre.trim() || null,
-            cliente_telefono: pedidoClienteTelefono.trim() || null,
-            direccion_entrega: pedidoDireccion.trim() || null,
-            observacion: pedidoObservacion.trim() || null,
-          }
+      {
+        // ventaValida garantiza modalidad !== "" en este punto.
+        modalidad,
+        mesa: modalidad === "local" ? pedidoMesa.trim() || null : null,
+        cliente_nombre: pedidoClienteNombre.trim() || null,
+        cliente_telefono: pedidoClienteTelefono.trim() || null,
+        direccion_entrega: pedidoDireccion.trim() || null,
+        observacion: pedidoObservacion.trim() || null,
+      }
     );
 
     if (!resultado.success) {
@@ -843,7 +842,7 @@ export default function NuevaVentaPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">
-                    Teléfono <span className="text-red-500">*</span>
+                    Teléfono
                   </label>
                   <input
                     type="text"
@@ -855,7 +854,7 @@ export default function NuevaVentaPage() {
                 </div>
                 <div className="lg:col-span-2">
                   <label className="block text-xs font-medium text-slate-600 mb-1">
-                    Dirección de entrega <span className="text-red-500">*</span>
+                    Dirección de entrega
                   </label>
                   <input
                     type="text"

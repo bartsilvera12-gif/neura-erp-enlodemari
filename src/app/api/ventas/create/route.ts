@@ -151,12 +151,8 @@ export async function POST(request: NextRequest) {
       const cliTel = trim(pedidoRaw.cliente_telefono);
       const direccion = trim(pedidoRaw.direccion_entrega);
       const obs = trim(pedidoRaw.observacion);
-      if (m === "delivery" && (cliTel.length === 0 || direccion.length === 0)) {
-        return NextResponse.json(
-          errorResponse("Teléfono y dirección requeridos para Delivery."),
-          { status: 400 }
-        );
-      }
+      // Datos de modalidad opcionales: no se rechaza la venta si faltan
+      // teléfono/dirección en Delivery (la caja no debe frenarse por eso).
       pedidoCocina = {
         modalidad: m,
         mesa: mesa || null,

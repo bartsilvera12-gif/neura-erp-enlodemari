@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import EdgeScrollArea from "@/components/ui/EdgeScrollArea";
 import { FancySelect } from "@/components/ui/FancySelect";
 import MobileFab from "@/components/ui/MobileFab";
+import CajaControlPanel from "@/components/caja/CajaControlPanel";
 import { getVentas } from "@/lib/ventas/storage";
 import type { Venta, TipoVenta, TipoIvaVenta } from "@/lib/ventas/types";
 import { sectoresParaTicket, sectoresCocinaParaComanda } from "@/lib/ventas/sector-tickets";
@@ -199,6 +200,8 @@ export default function VentasPage() {
   const [busqueda,   setBusqueda]   = useState("");
   const [filtroTipo, setFiltroTipo] = useState<TipoVenta | "">("");
   const [filtroIva,  setFiltroIva]  = useState<TipoIvaVenta | "">("");
+  // Caja por turno: sin caja abierta no se puede vender (badge + bloqueo del botón).
+  const [cajaAbierta, setCajaAbierta] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -259,6 +262,9 @@ export default function VentasPage() {
         <p className="mt-0.5 text-xs text-slate-500">Registro de ventas y salidas de inventario</p>
       </div>
 
+      {/* Estado de caja por turno: abrir/cerrar caja + movimientos. */}
+      <CajaControlPanel onStateChange={setCajaAbierta} />
+
       {/* ── Métricas del día ──────────────────────────────────────────────────── */}
       <div>
         <p className="text-xs text-gray-400 uppercase tracking-wide font-medium mb-3">
@@ -301,12 +307,21 @@ export default function VentasPage() {
 
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-xl font-semibold">Órdenes de venta</h2>
-          <Link
-            href="/ventas/nueva"
-            className="bg-[#0EA5E9] hover:bg-[#0284C7] text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
-          >
-            + Nueva venta
-          </Link>
+          {cajaAbierta ? (
+            <Link
+              href="/ventas/nueva"
+              className="bg-[#0EA5E9] hover:bg-[#0284C7] text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
+            >
+              + Nueva venta
+            </Link>
+          ) : (
+            <span
+              title="Abrí caja para poder vender"
+              className="cursor-not-allowed rounded-lg bg-slate-200 px-4 py-2 text-sm font-medium text-slate-400"
+            >
+              + Nueva venta
+            </span>
+          )}
         </div>
 
         {/* Filtros */}
@@ -456,8 +471,8 @@ export default function VentasPage() {
 
       </div>
 
-      {/* FAB mobile: acceso 1-tap a "+ Nueva venta" desde cualquier scroll position */}
-      <MobileFab href="/ventas/nueva" label="Nueva venta" />
+      {/* FAB mobile: acceso 1-tap a "+ Nueva venta" — solo con caja abierta. */}
+      {cajaAbierta && <MobileFab href="/ventas/nueva" label="Nueva venta" />}
     </div>
   );
 }

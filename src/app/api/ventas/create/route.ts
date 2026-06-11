@@ -4,6 +4,7 @@ import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema"
 import { createVentaTransaccionalPg } from "@/lib/ventas/server/create-venta-pg";
 import type { CreateVentaItemInput } from "@/lib/ventas/server/create-venta-pg";
 import { calcularLineaVenta } from "@/lib/ventas/iva";
+import { getCajaAbiertaPg } from "@/lib/caja/server/caja-pg";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
 import type { Venta, LineaVenta } from "@/lib/ventas/types";
@@ -180,6 +181,15 @@ export async function POST(request: NextRequest) {
 
     const schema = await fetchDataSchemaForEmpresaId(auth.empresa_id);
 
+    // La venta debe asociarse a la caja abierta. Sin caja abierta no se vende.
+    const cajaAbierta = await getCajaAbiertaPg(schema, auth.empresa_id);
+    if (!cajaAbierta) {
+      return NextResponse.json(
+        errorResponse("Para vender primero tenés que abrir caja."),
+        { status: 409 }
+      );
+    }
+
     const { ventaId, numeroControl, fechaIso } = await createVentaTransaccionalPg({
       schema,
       empresaId: auth.empresa_id,
@@ -195,6 +205,7 @@ export async function POST(request: NextRequest) {
       montoIvaDeclarado,
       totalDeclarado,
       pedidoCocina,
+      cajaId: cajaAbierta.id,
     });
 
     let sub = 0;

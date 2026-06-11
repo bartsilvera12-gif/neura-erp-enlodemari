@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import MontoInput from "@/components/ui/MontoInput";
 import ProductPickerModal, { type ProductoPickerItem, type AgregarVentaPayload } from "@/components/inventario/ProductPickerModal";
 import { saveVenta } from "@/lib/ventas/storage";
+import { getCajaAbierta } from "@/lib/caja/storage";
 import { calcularLineaVenta } from "@/lib/ventas/iva";
 import { sectoresParaTicket } from "@/lib/ventas/sector-tickets";
 import { getProductos } from "@/lib/inventario/storage";
@@ -84,6 +85,8 @@ export default function NuevaVentaPage() {
   const [items, setItems]           = useState<LineaVenta[]>([]);
   const [errorLinea, setErrorLinea] = useState<string | null>(null);
   const [errorVenta, setErrorVenta] = useState<string | null>(null);
+  // Caja por turno: sin caja abierta no se puede confirmar la venta.
+  const [sinCaja, setSinCaja] = useState(false);
 
   // ── Condiciones de la venta (fijas para En lo de Mari) ────────────────────
   // Instancia dedicada: siempre Guaraníes + Contado.
@@ -200,6 +203,15 @@ export default function NuevaVentaPage() {
     return () => { cancelled = true; };
   }, []);
 
+  // Verificar que haya una caja abierta; si no, bloquear y avisar.
+  useEffect(() => {
+    let cancelled = false;
+    getCajaAbierta().then((c) => {
+      if (!cancelled) setSinCaja(!c);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   // Cerrar dropdown al hacer clic fuera
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -250,7 +262,7 @@ export default function NuevaVentaPage() {
   // Solo la modalidad es obligatoria; los datos de cada modalidad (mesa,
   // teléfono, dirección, etc.) son opcionales para no frenar el cobro en caja.
   const pedidoValido = modalidad !== "";
-  const ventaValida   = items.length > 0 && pedidoValido;
+  const ventaValida   = items.length > 0 && pedidoValido && !sinCaja;
 
   // Vuelto (solo informativo, no se persiste)
   const montoRecibidoNum = parseFloat(montoRecibido) || 0;
@@ -421,6 +433,21 @@ export default function NuevaVentaPage() {
           Agregá productos del menú o reventa. Al confirmar se registra la venta y se genera el pedido.
         </p>
       </div>
+
+      {sinCaja && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3">
+          <p className="text-sm font-medium text-amber-800">
+            ⚠ No hay caja abierta. Para vender primero tenés que abrir caja.
+          </p>
+          <button
+            type="button"
+            onClick={() => router.push("/ventas")}
+            className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700"
+          >
+            Ir a abrir caja
+          </button>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6 max-w-7xl">
 

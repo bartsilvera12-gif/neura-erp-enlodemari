@@ -38,6 +38,8 @@ export interface CreateVentaPgParams {
   montoIvaDeclarado: number;
   totalDeclarado: number;
   pedidoCocina?: CreateVentaPedidoCocinaInput | null;
+  /** Caja (turno) a la que se asocia la venta. Obligatoria en En lo de Mari. */
+  cajaId: string;
 }
 
 function recalcTotals(items: CreateVentaItemInput[]) {
@@ -189,6 +191,7 @@ export async function createVentaTransaccionalPg(
       tipo_venta: params.tipoVenta,
       plazo_dias: params.plazoDias,
       metodo_pago: params.metodoPago,
+      caja_id: params.cajaId,
       fecha: fechaIso,
       observaciones: params.observaciones,
     })

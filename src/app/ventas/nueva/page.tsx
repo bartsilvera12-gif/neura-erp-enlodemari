@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import MontoInput from "@/components/ui/MontoInput";
 import ProductPickerModal, { type ProductoPickerItem, type AgregarVentaPayload } from "@/components/inventario/ProductPickerModal";
 import { saveVenta } from "@/lib/ventas/storage";
+import { calcularLineaVenta } from "@/lib/ventas/iva";
 import { sectoresParaTicket } from "@/lib/ventas/sector-tickets";
 import { getProductos } from "@/lib/inventario/storage";
 import type { TipoIvaVenta, TipoVenta, MonedaVenta, LineaVenta, MetodoPago } from "@/lib/ventas/types";
@@ -16,11 +17,8 @@ function formatGs(valor: number) {
   return `Gs. ${Math.round(valor).toLocaleString("es-PY")}`;
 }
 
-function calcIva(tipo: TipoIvaVenta, base: number) {
-  if (tipo === "EXENTA") return 0;
-  if (tipo === "5%")     return base * 0.05;
-  return base * 0.10;
-}
+// IVA INCLUIDO: el precio ya contiene el impuesto. El desglose vive en
+// `@/lib/ventas/iva` (misma fórmula que usa el backend autoritativo).
 
 // ── Estilos ────────────────────────────────────────────────────────────────────
 
@@ -164,9 +162,9 @@ export default function NuevaVentaPage() {
         return false;
       }
     }
-    const subtotal = cantidad * precioPyg;
-    const montoIva = calcIva(iva, subtotal);
-    const totalLinea = subtotal + montoIva;
+    // IVA incluido: total = precio × cantidad; el IVA se deduce, no se suma.
+    const { subtotal, monto_iva: montoIva, total_linea: totalLinea } =
+      calcularLineaVenta(precioPyg, cantidad, iva);
 
     // Asegurar que el producto este en el array local (para que stock_actual
     // se conozca en validaciones posteriores del form inline).
@@ -232,9 +230,11 @@ export default function NuevaVentaPage() {
   const prodSelControlaStock = prodSel ? prodSel.controla_stock !== false : true;
   const stockDisp = (prodSel?.stock_actual ?? 0) - enCarrito;
 
-  const lineaSubtotal   = cantNum > 0 && precioGs > 0 ? cantNum * precioGs : 0;
-  const lineaMontoIva   = calcIva(lineaIva, lineaSubtotal);
-  const lineaTotalLinea = lineaSubtotal + lineaMontoIva;
+  // IVA incluido: total línea = precio × cantidad; base e IVA se deducen.
+  const lineaDesglose   = calcularLineaVenta(precioGs, cantNum, lineaIva);
+  const lineaSubtotal   = lineaDesglose.subtotal;     // base imponible
+  const lineaMontoIva   = lineaDesglose.monto_iva;    // IVA incluido
+  const lineaTotalLinea = lineaDesglose.total_linea;  // precio × cantidad
 
   // Solo validar stock para productos que lo controlan (Reventa).
   // Productos del Menú (controla_stock=false) se venden sin restricción de stock.

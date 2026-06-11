@@ -9,12 +9,12 @@ export interface LineaVenta {
   producto_nombre:       string;
   sku:                   string;
   cantidad:              number;
-  precio_venta_original: number;  // en la moneda elegida
-  precio_venta:          number;  // siempre en GS
+  precio_venta_original: number;  // en la moneda elegida (IVA incluido)
+  precio_venta:          number;  // siempre en GS (IVA incluido)
   tipo_iva:              TipoIvaVenta;
-  subtotal:              number;  // precio_venta × cantidad
-  monto_iva:             number;
-  total_linea:           number;  // subtotal + monto_iva
+  subtotal:              number;  // base imponible = total_linea − monto_iva
+  monto_iva:             number;  // IVA INCLUIDO en el precio (no se suma encima)
+  total_linea:           number;  // precio_venta × cantidad (IVA incluido) = subtotal + monto_iva
 }
 
 /** Cabecera de venta: condiciones comerciales + totales consolidados. */

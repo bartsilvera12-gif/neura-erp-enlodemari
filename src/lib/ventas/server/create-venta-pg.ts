@@ -1,4 +1,5 @@
 import { createServiceRoleClientWithDbSchema } from "@/lib/supabase/empresa-data-schema";
+import { calcularLineaVenta } from "@/lib/ventas/iva";
 
 export interface CreateVentaItemInput {
   producto_id: string;
@@ -68,10 +69,22 @@ const TOL = 2;
 export async function createVentaTransaccionalPg(
   params: CreateVentaPgParams
 ): Promise<{ ventaId: string; numeroControl: string; fechaIso: string }> {
-  const items = params.items;
-  if (!items.length) {
+  if (!params.items.length) {
     throw new Error("La venta debe tener al menos un ítem.");
   }
+
+  // El servidor es la fuente de verdad: recalcula el desglose de IVA de cada
+  // línea como IVA INCLUIDO (precio × cantidad = total; el IVA se deduce, no se
+  // suma). Así un frontend desactualizado nunca puede inflar el total con IVA.
+  const items: CreateVentaItemInput[] = params.items.map((it) => {
+    const desglose = calcularLineaVenta(it.precio_venta, it.cantidad, it.tipo_iva);
+    return {
+      ...it,
+      subtotal: desglose.subtotal,
+      monto_iva: desglose.monto_iva,
+      total_linea: desglose.total_linea,
+    };
+  });
 
   const calc = recalcTotals(items);
   if (

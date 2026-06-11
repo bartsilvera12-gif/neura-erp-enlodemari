@@ -3,6 +3,7 @@ import { getUserAndEmpresa } from "@/lib/middleware/auth";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { createVentaTransaccionalPg } from "@/lib/ventas/server/create-venta-pg";
 import type { CreateVentaItemInput } from "@/lib/ventas/server/create-venta-pg";
+import { calcularLineaVenta } from "@/lib/ventas/iva";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
 import type { Venta, LineaVenta } from "@/lib/ventas/types";
@@ -17,17 +18,22 @@ function asItems(body: unknown): CreateVentaItemInput[] | null {
     const r = x as Record<string, unknown>;
     const tipoIva = r.tipo_iva;
     if (tipoIva !== "EXENTA" && tipoIva !== "5%" && tipoIva !== "10%") return null;
+    const cantidad = Number(r.cantidad);
+    const precioVenta = Number(r.precio_venta);
+    // IVA INCLUIDO: el desglose se recalcula en el servidor a partir de
+    // precio × cantidad; nunca se confía en subtotal/iva/total del cliente.
+    const desglose = calcularLineaVenta(precioVenta, cantidad, tipoIva);
     out.push({
       producto_id: String(r.producto_id ?? ""),
       producto_nombre: String(r.producto_nombre ?? ""),
       sku: String(r.sku ?? ""),
-      cantidad: Number(r.cantidad),
+      cantidad,
       precio_venta_original: Number(r.precio_venta_original),
-      precio_venta: Number(r.precio_venta),
+      precio_venta: precioVenta,
       tipo_iva: tipoIva,
-      subtotal: Number(r.subtotal),
-      monto_iva: Number(r.monto_iva),
-      total_linea: Number(r.total_linea),
+      subtotal: desglose.subtotal,
+      monto_iva: desglose.monto_iva,
+      total_linea: desglose.total_linea,
     });
   }
   if (out.some((i) => !i.producto_id || !(i.cantidad > 0))) return null;
@@ -161,12 +167,15 @@ export async function POST(request: NextRequest) {
       };
     }
 
-    const subtotalDeclarado = Number(o.subtotal);
-    const montoIvaDeclarado = Number(o.monto_iva);
-    const totalDeclarado = Number(o.total);
-
-    if ([subtotalDeclarado, montoIvaDeclarado, totalDeclarado].some((n) => Number.isNaN(n))) {
-      return NextResponse.json(errorResponse("Totales inválidos."), { status: 400 });
+    // Totales derivados de los ítems YA recalculados en el servidor (IVA incluido).
+    // No se confía en los totales del cliente: la cabecera es autoritativa server-side.
+    let subtotalDeclarado = 0;
+    let montoIvaDeclarado = 0;
+    let totalDeclarado = 0;
+    for (const it of items) {
+      subtotalDeclarado += it.subtotal;
+      montoIvaDeclarado += it.monto_iva;
+      totalDeclarado += it.total_linea;
     }
 
     if (moneda === "USD" && tipoCambio <= 0) {

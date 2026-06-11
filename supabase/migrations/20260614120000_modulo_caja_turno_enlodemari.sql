@@ -12,11 +12,13 @@
 --
 -- Reglas:
 --   · Aditiva e idempotente (CREATE ... IF NOT EXISTS / DROP+CREATE POLICY).
---   · NO toca otros schemas (public, zentra_erp salvo FKs al catálogo central
---     empresas/usuarios, igual que el resto del repo), NI otros clientes.
+--   · Instancia MONOCLIENTE: el catálogo (empresas, usuarios) y las funciones
+--     RLS/trigger viven DENTRO del schema enlodemari. Todas las referencias son
+--     schema-local (enlodemari.*). NO toca public, zentra_erp ni otros clientes.
 --   · NO reasigna ventas históricas: caja_id queda NULL en las previas.
---   · empresa_id → zentra_erp.empresas (catálogo central, como productos/ventas).
---   · RLS: public.puede_acceder_empresa(empresa_id). Trigger: public.set_updated_at.
+--   · empresa_id → enlodemari.empresas; usuarios → enlodemari.usuarios
+--     (mismo patrón que enlodemari.ventas / enlodemari.proyectos).
+--   · RLS: enlodemari.puede_acceder_empresa(empresa_id). Trigger: enlodemari.set_updated_at.
 -- =============================================================================
 
 DO $$
@@ -34,11 +36,11 @@ BEGIN
     EXECUTE format($ddl$
       CREATE TABLE %I.cajas (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        empresa_id uuid NOT NULL REFERENCES zentra_erp.empresas(id) ON DELETE CASCADE,
+        empresa_id uuid NOT NULL REFERENCES %I.empresas(id) ON DELETE CASCADE,
         numero_caja bigint NOT NULL,
         estado text NOT NULL DEFAULT 'abierta' CHECK (estado IN ('abierta','cerrada')),
-        abierta_por uuid REFERENCES zentra_erp.usuarios(id) ON DELETE SET NULL,
-        cerrada_por uuid REFERENCES zentra_erp.usuarios(id) ON DELETE SET NULL,
+        abierta_por uuid REFERENCES %I.usuarios(id) ON DELETE SET NULL,
+        cerrada_por uuid REFERENCES %I.usuarios(id) ON DELETE SET NULL,
         fecha_apertura timestamptz NOT NULL DEFAULT now(),
         fecha_cierre timestamptz,
         monto_apertura numeric(14,2) NOT NULL DEFAULT 0,
@@ -51,66 +53,61 @@ BEGIN
         updated_at timestamptz NOT NULL DEFAULT now(),
         CONSTRAINT uq_cajas_empresa_numero UNIQUE (empresa_id, numero_caja)
       )
-    $ddl$, sch);
+    $ddl$, sch, sch, sch, sch);
   END IF;
 
-  EXECUTE format(
-    'CREATE INDEX IF NOT EXISTS ix_cajas_empresa_estado ON %I.cajas (empresa_id, estado)', sch);
-  EXECUTE format(
-    'CREATE INDEX IF NOT EXISTS ix_cajas_empresa_apertura ON %I.cajas (empresa_id, fecha_apertura DESC)', sch);
+  EXECUTE format('CREATE INDEX IF NOT EXISTS ix_cajas_empresa_estado ON %I.cajas (empresa_id, estado)', sch);
+  EXECUTE format('CREATE INDEX IF NOT EXISTS ix_cajas_empresa_apertura ON %I.cajas (empresa_id, fecha_apertura DESC)', sch);
   -- Una sola caja ABIERTA por empresa a la vez.
-  EXECUTE format(
-    'CREATE UNIQUE INDEX IF NOT EXISTS uq_cajas_una_abierta ON %I.cajas (empresa_id) WHERE estado = ''abierta''', sch);
+  EXECUTE format('CREATE UNIQUE INDEX IF NOT EXISTS uq_cajas_una_abierta ON %I.cajas (empresa_id) WHERE estado = ''abierta''', sch);
 
   EXECUTE format('ALTER TABLE %I.cajas ENABLE ROW LEVEL SECURITY', sch);
   EXECUTE format('DROP POLICY IF EXISTS cajas_select ON %I.cajas', sch);
-  EXECUTE format('CREATE POLICY cajas_select ON %I.cajas FOR SELECT USING (public.puede_acceder_empresa(empresa_id))', sch);
+  EXECUTE format('CREATE POLICY cajas_select ON %I.cajas FOR SELECT USING (%I.puede_acceder_empresa(empresa_id))', sch, sch);
   EXECUTE format('DROP POLICY IF EXISTS cajas_insert ON %I.cajas', sch);
-  EXECUTE format('CREATE POLICY cajas_insert ON %I.cajas FOR INSERT WITH CHECK (public.puede_acceder_empresa(empresa_id))', sch);
+  EXECUTE format('CREATE POLICY cajas_insert ON %I.cajas FOR INSERT WITH CHECK (%I.puede_acceder_empresa(empresa_id))', sch, sch);
   EXECUTE format('DROP POLICY IF EXISTS cajas_update ON %I.cajas', sch);
-  EXECUTE format('CREATE POLICY cajas_update ON %I.cajas FOR UPDATE USING (public.puede_acceder_empresa(empresa_id)) WITH CHECK (public.puede_acceder_empresa(empresa_id))', sch);
+  EXECUTE format('CREATE POLICY cajas_update ON %I.cajas FOR UPDATE USING (%I.puede_acceder_empresa(empresa_id)) WITH CHECK (%I.puede_acceder_empresa(empresa_id))', sch, sch, sch);
   EXECUTE format('DROP POLICY IF EXISTS cajas_delete ON %I.cajas', sch);
-  EXECUTE format('CREATE POLICY cajas_delete ON %I.cajas FOR DELETE USING (public.puede_acceder_empresa(empresa_id))', sch);
+  EXECUTE format('CREATE POLICY cajas_delete ON %I.cajas FOR DELETE USING (%I.puede_acceder_empresa(empresa_id))', sch, sch);
 
   EXECUTE format('DROP TRIGGER IF EXISTS tr_cajas_updated ON %I.cajas', sch);
-  EXECUTE format('CREATE TRIGGER tr_cajas_updated BEFORE UPDATE ON %I.cajas FOR EACH ROW EXECUTE FUNCTION public.set_updated_at()', sch);
+  EXECUTE format('CREATE TRIGGER tr_cajas_updated BEFORE UPDATE ON %I.cajas FOR EACH ROW EXECUTE FUNCTION %I.set_updated_at()', sch, sch);
 
   -- ── 2) Tabla caja_movimientos ─────────────────────────────────────────────
   IF to_regclass(format('%I.caja_movimientos', sch)) IS NULL THEN
     EXECUTE format($ddl$
       CREATE TABLE %I.caja_movimientos (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        empresa_id uuid NOT NULL REFERENCES zentra_erp.empresas(id) ON DELETE CASCADE,
+        empresa_id uuid NOT NULL REFERENCES %I.empresas(id) ON DELETE CASCADE,
         caja_id uuid NOT NULL REFERENCES %I.cajas(id) ON DELETE CASCADE,
         tipo text NOT NULL CHECK (tipo IN ('ingreso','egreso','retiro','ajuste')),
         concepto text NOT NULL,
         monto numeric(14,2) NOT NULL,
         medio_pago text NOT NULL DEFAULT 'efectivo',
-        usuario_id uuid REFERENCES zentra_erp.usuarios(id) ON DELETE SET NULL,
+        usuario_id uuid REFERENCES %I.usuarios(id) ON DELETE SET NULL,
         observacion text,
         created_at timestamptz NOT NULL DEFAULT now(),
         CONSTRAINT chk_caja_mov_concepto_non_empty CHECK (length(trim(concepto)) > 0)
       )
-    $ddl$, sch, sch);
+    $ddl$, sch, sch, sch, sch);
   END IF;
 
-  EXECUTE format(
-    'CREATE INDEX IF NOT EXISTS ix_caja_mov_caja ON %I.caja_movimientos (empresa_id, caja_id, created_at)', sch);
+  EXECUTE format('CREATE INDEX IF NOT EXISTS ix_caja_mov_caja ON %I.caja_movimientos (empresa_id, caja_id, created_at)', sch);
 
   EXECUTE format('ALTER TABLE %I.caja_movimientos ENABLE ROW LEVEL SECURITY', sch);
   EXECUTE format('DROP POLICY IF EXISTS caja_mov_select ON %I.caja_movimientos', sch);
-  EXECUTE format('CREATE POLICY caja_mov_select ON %I.caja_movimientos FOR SELECT USING (public.puede_acceder_empresa(empresa_id))', sch);
+  EXECUTE format('CREATE POLICY caja_mov_select ON %I.caja_movimientos FOR SELECT USING (%I.puede_acceder_empresa(empresa_id))', sch, sch);
   EXECUTE format('DROP POLICY IF EXISTS caja_mov_insert ON %I.caja_movimientos', sch);
-  EXECUTE format('CREATE POLICY caja_mov_insert ON %I.caja_movimientos FOR INSERT WITH CHECK (public.puede_acceder_empresa(empresa_id))', sch);
+  EXECUTE format('CREATE POLICY caja_mov_insert ON %I.caja_movimientos FOR INSERT WITH CHECK (%I.puede_acceder_empresa(empresa_id))', sch, sch);
   EXECUTE format('DROP POLICY IF EXISTS caja_mov_update ON %I.caja_movimientos', sch);
-  EXECUTE format('CREATE POLICY caja_mov_update ON %I.caja_movimientos FOR UPDATE USING (public.puede_acceder_empresa(empresa_id)) WITH CHECK (public.puede_acceder_empresa(empresa_id))', sch);
+  EXECUTE format('CREATE POLICY caja_mov_update ON %I.caja_movimientos FOR UPDATE USING (%I.puede_acceder_empresa(empresa_id)) WITH CHECK (%I.puede_acceder_empresa(empresa_id))', sch, sch, sch);
   EXECUTE format('DROP POLICY IF EXISTS caja_mov_delete ON %I.caja_movimientos', sch);
-  EXECUTE format('CREATE POLICY caja_mov_delete ON %I.caja_movimientos FOR DELETE USING (public.puede_acceder_empresa(empresa_id))', sch);
+  EXECUTE format('CREATE POLICY caja_mov_delete ON %I.caja_movimientos FOR DELETE USING (%I.puede_acceder_empresa(empresa_id))', sch, sch);
 
   -- ── 3) ventas.caja_id (no se reasignan ventas históricas: quedan NULL) ─────
   EXECUTE format('ALTER TABLE %I.ventas ADD COLUMN IF NOT EXISTS caja_id uuid', sch);
-  EXECUTE format(
-    'CREATE INDEX IF NOT EXISTS ix_ventas_caja ON %I.ventas (empresa_id, caja_id)', sch);
+  EXECUTE format('CREATE INDEX IF NOT EXISTS ix_ventas_caja ON %I.ventas (empresa_id, caja_id)', sch);
 
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint con
@@ -119,13 +116,12 @@ BEGIN
     WHERE n.nspname = sch AND c.relname = 'ventas' AND con.conname = 'ventas_caja_id_fkey'
   ) THEN
     BEGIN
-      EXECUTE format(
-        'ALTER TABLE %I.ventas ADD CONSTRAINT ventas_caja_id_fkey
-           FOREIGN KEY (caja_id) REFERENCES %I.cajas(id) ON DELETE SET NULL', sch, sch);
+      EXECUTE format('ALTER TABLE %I.ventas ADD CONSTRAINT ventas_caja_id_fkey
+        FOREIGN KEY (caja_id) REFERENCES %I.cajas(id) ON DELETE SET NULL', sch, sch);
     EXCEPTION WHEN OTHERS THEN
       RAISE NOTICE '[caja] no se pudo crear FK ventas.caja_id: %', SQLERRM;
     END;
   END IF;
 
-  RAISE NOTICE '[caja] módulo de caja por turno aplicado en schema %.', sch;
+  RAISE NOTICE '[caja] modulo de caja por turno aplicado en schema %.', sch;
 END $$;

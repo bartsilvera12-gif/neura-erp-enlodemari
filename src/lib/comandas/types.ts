@@ -1,16 +1,15 @@
 /**
- * Tipos del tablero de Comandas (cocina) — En lo de Mari (schema enlodemari).
+ * Tipos de Comandas — En lo de Mari (schema enlodemari).
  *
- * Una comanda es un envío a cocina de los ítems pendientes de una mesa
- * (enlodemari.comandas). Tiene un flujo propio de cocina, independiente del
- * cobro/facturación: enviada → en_preparacion → lista → entregada (o cancelada).
+ * Una comanda es un TICKET interno: el mozo la genera desde Mesas ("Enviar
+ * comanda"), y caja/admin la imprime para pasársela a cocina. No es un kanban de
+ * producción: estados = generada → impresa (puede reimprimirse) → o cancelada.
+ * Imprimir NO crea venta, NO toca caja, stock ni la mesa.
  */
 
-export type EstadoComanda = "enviada" | "en_preparacion" | "lista" | "entregada" | "cancelada";
+export type EstadoComanda = "generada" | "impresa" | "cancelada";
 
-export const ESTADOS_COMANDA: EstadoComanda[] = [
-  "enviada", "en_preparacion", "lista", "entregada", "cancelada",
-];
+export const ESTADOS_COMANDA: EstadoComanda[] = ["generada", "impresa", "cancelada"];
 
 export interface ComandaItem {
   id: string;
@@ -18,7 +17,7 @@ export interface ComandaItem {
   cantidad: number;
   observacion: string | null;
   total: number;
-  /** estado del ítem en la cuenta (enviado/cancelado), no de la comanda. */
+  /** estado del ítem en la cuenta (cancelado en Mesas), no de la comanda. */
   cancelado: boolean;
 }
 
@@ -29,6 +28,9 @@ export interface ComandaCard {
   created_at: string;
   mesa_numero: number | null;
   mozo_nombre: string | null;
+  /** Suma de ítems vigentes (uso interno; el ticket de cocina NO muestra precio). */
   total: number;
   items: ComandaItem[];
+  printed_at: string | null;
+  print_count: number;
 }

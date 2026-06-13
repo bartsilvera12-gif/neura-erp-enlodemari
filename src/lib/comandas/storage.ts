@@ -13,15 +13,14 @@ export async function getComandas(estado?: EstadoComanda | null): Promise<Comand
   }
 }
 
-export async function cambiarEstadoComanda(
-  id: string,
-  estado: EstadoComanda
-): Promise<{ success: true; comanda: ComandaCard } | { success: false; error: string }> {
+type Res = { success: true; comanda: ComandaCard } | { success: false; error: string };
+
+async function postComanda(id: string, accion: "imprimir" | "reimprimir" | "cancelar"): Promise<Res> {
   try {
-    const res = await fetchWithSupabaseSession(`/api/comandas/${encodeURIComponent(id)}/estado`, {
-      method: "PATCH",
+    const res = await fetchWithSupabaseSession(`/api/comandas/${encodeURIComponent(id)}/${accion}`, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ estado }),
+      body: "{}",
     });
     const json = (await res.json()) as { success?: boolean; data?: { comanda: ComandaCard }; error?: string };
     if (!res.ok || !json.success || !json.data) return { success: false, error: json.error ?? `Error (${res.status}).` };
@@ -30,3 +29,13 @@ export async function cambiarEstadoComanda(
     return { success: false, error: e instanceof Error ? e.message : "Error de red." };
   }
 }
+
+/** Registra impresión (print_count++, estado=impresa). */
+export const imprimirComanda = (id: string) => postComanda(id, "imprimir");
+/** Registra reimpresión (print_count++). */
+export const reimprimirComanda = (id: string) => postComanda(id, "reimprimir");
+/** Cancela el ticket de comanda. */
+export const cancelarComanda = (id: string) => postComanda(id, "cancelar");
+
+/** URL del ticket imprimible (HTML, sin precio, auto-print). */
+export const comandaPrintUrl = (id: string) => `/api/comandas/${encodeURIComponent(id)}/print`;

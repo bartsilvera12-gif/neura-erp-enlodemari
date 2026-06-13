@@ -66,3 +66,38 @@ export interface CajaResumen {
   efectivo_esperado: number;
   movimientos: CajaMovimiento[];
 }
+
+/** Una venta asociada a una caja (para el detalle de cierre). */
+export interface VentaDeCaja {
+  id: string;
+  numero_control: string;
+  fecha: string;
+  metodo_pago: "efectivo" | "tarjeta" | "transferencia" | null;
+  total: number;
+  cantidad_items: number;
+}
+
+/** Detalle completo de una caja: arqueo + movimientos + ventas asociadas. */
+export interface CajaDetalle {
+  resumen: CajaResumen;
+  ventas: VentaDeCaja[];
+}
+
+/**
+ * Estado de cuenta de la lomitería: agregado sobre cajas CERRADAS en un rango
+ * (por fecha_cierre). neto_estimado = total_vendido − egresos − retiros.
+ */
+export interface EstadoCuentaLomiteria {
+  desde: string | null;
+  hasta: string | null;
+  cajas_cerradas: number;
+  total_vendido: number;
+  total_efectivo: number;
+  total_transferencia: number;
+  total_tarjeta: number;
+  total_egresos: number;
+  total_retiros: number;
+  diferencias_acumuladas: number;
+  promedio_vendido: number;
+  neto_estimado: number;
+}

@@ -1,5 +1,12 @@
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
-import type { Caja, CajaResumen, MedioPagoCaja, TipoMovimientoCaja } from "./types";
+import type {
+  Caja,
+  CajaDetalle,
+  CajaResumen,
+  EstadoCuentaLomiteria,
+  MedioPagoCaja,
+  TipoMovimientoCaja,
+} from "./types";
 
 type Ok<T> = { success: true } & T;
 type Err = { success: false; error: string };
@@ -79,5 +86,53 @@ export async function getHistorialCajas(): Promise<CajaResumen[]> {
     return json.data?.cajas ?? [];
   } catch {
     return [];
+  }
+}
+
+// ── Reportes ────────────────────────────────────────────────────────────────
+
+/** Listado de cierres de caja (turnos) con totales. */
+export async function getCierresCaja(): Promise<CajaResumen[]> {
+  try {
+    const res = await fetchWithSupabaseSession("/api/reportes/cierres-caja", { cache: "no-store" });
+    const json = (await res.json()) as { success?: boolean; data?: { cajas: CajaResumen[] }; error?: string };
+    if (!res.ok || !json.success) return [];
+    return json.data?.cajas ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Detalle de una caja: arqueo + movimientos + ventas asociadas. */
+export async function getCajaDetalle(cajaId: string): Promise<CajaDetalle | null> {
+  try {
+    const res = await fetchWithSupabaseSession(
+      `/api/reportes/cierres-caja/${encodeURIComponent(cajaId)}`,
+      { cache: "no-store" }
+    );
+    const json = (await res.json()) as { success?: boolean; data?: { detalle: CajaDetalle }; error?: string };
+    if (!res.ok || !json.success) return null;
+    return json.data?.detalle ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Estado de cuenta de la lomitería (agregado sobre cajas cerradas en un rango). */
+export async function getEstadoCuenta(
+  desde?: string | null,
+  hasta?: string | null
+): Promise<EstadoCuentaLomiteria | null> {
+  try {
+    const qs = new URLSearchParams();
+    if (desde) qs.set("desde", desde);
+    if (hasta) qs.set("hasta", hasta);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    const res = await fetchWithSupabaseSession(`/api/reportes/estado-cuenta-lomiteria${suffix}`, { cache: "no-store" });
+    const json = (await res.json()) as { success?: boolean; data?: { estado: EstadoCuentaLomiteria }; error?: string };
+    if (!res.ok || !json.success) return null;
+    return json.data?.estado ?? null;
+  } catch {
+    return null;
   }
 }

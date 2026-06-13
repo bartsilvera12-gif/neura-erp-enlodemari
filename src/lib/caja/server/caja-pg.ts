@@ -1,11 +1,14 @@
 import { createServiceRoleClientWithDbSchema } from "@/lib/supabase/empresa-data-schema";
 import type {
   Caja,
+  CajaDetalle,
   CajaMovimiento,
   CajaResumen,
   EstadoCaja,
+  EstadoCuentaLomiteria,
   MedioPagoCaja,
   TipoMovimientoCaja,
+  VentaDeCaja,
 } from "@/lib/caja/types";
 
 // ── Helpers de mapeo ──────────────────────────────────────────────────────────
@@ -110,6 +113,106 @@ export async function getResumenCajaPg(
   const resumen = await computeResumen(sb, empresaId, mapCaja(q.data as unknown as CajaRow));
   await attachUsuarioNombres(sb, [resumen]);
   return resumen;
+}
+
+/** Detalle de una caja para reportes: arqueo + movimientos + ventas asociadas. */
+export async function getCajaDetallePg(
+  schema: string,
+  empresaId: string,
+  cajaId: string
+): Promise<CajaDetalle | null> {
+  const resumen = await getResumenCajaPg(schema, empresaId, cajaId);
+  if (!resumen) return null;
+
+  const sb = createServiceRoleClientWithDbSchema(schema);
+  const vQ = await sb
+    .from("ventas")
+    .select("id, numero_control, fecha, metodo_pago, total")
+    .eq("empresa_id", empresaId)
+    .eq("caja_id", cajaId)
+    .neq("estado", "anulada")
+    .order("fecha", { ascending: true });
+  if (vQ.error) throw new Error(vQ.error.message);
+  const rows = (vQ.data ?? []) as unknown as Array<{
+    id: string;
+    numero_control: string;
+    fecha: string;
+    metodo_pago: string | null;
+    total: number | string;
+  }>;
+
+  // Conteo de ítems por venta (ventas_items) para el detalle.
+  const ids = rows.map((r) => r.id);
+  const countByVenta = new Map<string, number>();
+  if (ids.length) {
+    const iQ = await sb.from("ventas_items").select("venta_id").eq("empresa_id", empresaId).in("venta_id", ids);
+    if (!iQ.error) {
+      for (const it of (iQ.data ?? []) as Array<{ venta_id: string }>) {
+        countByVenta.set(it.venta_id, (countByVenta.get(it.venta_id) ?? 0) + 1);
+      }
+    }
+  }
+
+  const ventas: VentaDeCaja[] = rows.map((r) => ({
+    id: r.id,
+    numero_control: r.numero_control,
+    fecha: r.fecha,
+    metodo_pago:
+      r.metodo_pago === "tarjeta" ? "tarjeta"
+      : r.metodo_pago === "transferencia" ? "transferencia"
+      : r.metodo_pago === "efectivo" ? "efectivo"
+      : null,
+    total: num(r.total),
+    cantidad_items: countByVenta.get(r.id) ?? 0,
+  }));
+
+  return { resumen, ventas };
+}
+
+/**
+ * Estado de cuenta de la lomitería: agrega sobre cajas CERRADAS cuyo fecha_cierre
+ * cae en [desde, hasta] (fechas yyyy-mm-dd, inclusivas). Se basa en caja/turno,
+ * no en fecha calendario de cada venta.
+ */
+export async function getEstadoCuentaPg(
+  schema: string,
+  empresaId: string,
+  desde: string | null,
+  hasta: string | null
+): Promise<EstadoCuentaLomiteria> {
+  const cajas = await listarCajasPg(schema, empresaId, 300);
+  const dStart = desde ? new Date(`${desde}T00:00:00`) : null;
+  const dEnd = hasta ? new Date(`${hasta}T23:59:59.999`) : null;
+
+  const cerradas = cajas.filter((c) => {
+    if (c.caja.estado !== "cerrada" || !c.caja.fecha_cierre) return false;
+    const f = new Date(c.caja.fecha_cierre);
+    if (dStart && f < dStart) return false;
+    if (dEnd && f > dEnd) return false;
+    return true;
+  });
+
+  let total_vendido = 0, total_efectivo = 0, total_transferencia = 0, total_tarjeta = 0;
+  let total_egresos = 0, total_retiros = 0, diferencias_acumuladas = 0;
+  for (const c of cerradas) {
+    total_vendido += c.total_vendido;
+    total_efectivo += c.total_efectivo;
+    total_transferencia += c.total_transferencia;
+    total_tarjeta += c.total_tarjeta;
+    total_egresos += c.egresos_efectivo;
+    total_retiros += c.retiros_efectivo;
+    diferencias_acumuladas += c.caja.diferencia ?? 0;
+  }
+  const n = cerradas.length;
+
+  return {
+    desde, hasta,
+    cajas_cerradas: n,
+    total_vendido, total_efectivo, total_transferencia, total_tarjeta,
+    total_egresos, total_retiros, diferencias_acumuladas,
+    promedio_vendido: n ? Math.round(total_vendido / n) : 0,
+    neto_estimado: total_vendido - total_egresos - total_retiros,
+  };
 }
 
 type Sb = ReturnType<typeof createServiceRoleClientWithDbSchema>;

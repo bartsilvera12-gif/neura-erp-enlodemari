@@ -134,6 +134,21 @@ function AuthGuardInner({ children }: { children: React.ReactNode }) {
       !access.superAdmin &&
       !isModuleSlugGranted(slug, access.slugs, access.inactiveSlugs, { strict: access.strict })
     ) {
+      // La raíz "/" exige el módulo `dashboard`. Si el usuario no lo tiene
+      // (p. ej. un mozo, que solo tiene `mesas`), NO bloqueamos: lo redirigimos
+      // a su primera ruta permitida (limpia cualquier `?tab=...` viejo). Para el
+      // resto de rutas sí mostramos el bloqueo (deep-link a un módulo ajeno).
+      if (pathname === "/") {
+        router.replace(
+          firstAccessibleHref(access.slugs, {
+            superAdmin: access.superAdmin,
+            inactiveSlugs: access.inactiveSlugs,
+            strict: access.strict,
+          })
+        );
+        setBlockedSlug(null);
+        return;
+      }
       setBlockedSlug(slug);
       return;
     }

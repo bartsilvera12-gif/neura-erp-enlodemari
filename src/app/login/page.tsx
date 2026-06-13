@@ -5,6 +5,8 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 import { signIn } from "@/lib/auth";
+import { getModuleAccessCached } from "@/lib/modulos/module-access-cache";
+import { firstAccessibleHref } from "@/lib/modulos/route-slug-map";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -38,7 +40,25 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/");
+    // Redirigir según los módulos del usuario: si tiene `dashboard` va a "/",
+    // si no (p. ej. un mozo, solo `mesas`) va a su primera ruta permitida.
+    // forceRefresh: el browser pudo tener cacheados los módulos de otro usuario.
+    try {
+      const { ok, data } = await getModuleAccessCached({ forceRefresh: true });
+      if (ok) {
+        router.replace(
+          firstAccessibleHref(new Set(data.slugs ?? []), {
+            superAdmin: !!data.superAdmin,
+            inactiveSlugs: new Set(data.inactiveSlugs ?? []),
+            strict: !!data.strictAllowlist,
+          })
+        );
+        return;
+      }
+    } catch {
+      /* si falla la resolución de módulos, caemos al default de abajo */
+    }
+    router.replace("/");
   }
 
   return (

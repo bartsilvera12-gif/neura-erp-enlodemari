@@ -8,10 +8,11 @@ interface ProductoHit {
   nombre: string;
   precio_venta: number;
   imagen_url: string | null;
-  categoria_nombre: string | null;
+  categoria: string | null;
   /** true = reventa (muestra stock); false = menú/elaborado (badge "Menú"). */
   controla_stock: boolean;
-  stock_actual: number;
+  /** Solo presente en reventa; null en menú/elaborado. */
+  stock_actual: number | null;
 }
 
 function formatGs(v: number) {
@@ -48,7 +49,7 @@ export default function MesaProductPicker({
     if (!open || loadedRef.current) return;
     loadedRef.current = true;
     setLoading(true);
-    fetchWithSupabaseSession("/api/productos/search?limit=100", { cache: "no-store" })
+    fetchWithSupabaseSession("/api/mesas/productos", { cache: "no-store" })
       .then((r) => r.json())
       .then((j) => setProductos((j?.data?.items ?? []) as ProductoHit[]))
       .catch(() => setProductos([]))
@@ -57,14 +58,14 @@ export default function MesaProductPicker({
 
   const categorias = useMemo(() => {
     const set = new Set<string>();
-    for (const p of productos) set.add(p.categoria_nombre || "Sin categoría");
+    for (const p of productos) set.add(p.categoria || "Sin categoría");
     return [...set].sort();
   }, [productos]);
 
   const filtrados = useMemo(() => {
     const term = q.trim().toLowerCase();
     return productos.filter((p) => {
-      const cat = p.categoria_nombre || "Sin categoría";
+      const cat = p.categoria || "Sin categoría";
       if (catSel !== "__todas__" && cat !== catSel) return false;
       if (term && !p.nombre.toLowerCase().includes(term)) return false;
       return true;
@@ -136,8 +137,8 @@ export default function MesaProductPicker({
                     <p className="mt-0.5 text-sm font-bold text-[#0EA5E9]">{formatGs(p.precio_venta)}</p>
                     {/* Reventa → stock; menú/elaborado → badge (no se bloquea por stock). */}
                     {p.controla_stock ? (
-                      <p className={`mt-0.5 text-[11px] font-medium ${p.stock_actual <= 0 ? "text-red-500" : "text-slate-500"}`}>
-                        {p.stock_actual <= 0 ? "Sin stock" : `Stock: ${p.stock_actual}`}
+                      <p className={`mt-0.5 text-[11px] font-medium ${(p.stock_actual ?? 0) <= 0 ? "text-red-500" : "text-slate-500"}`}>
+                        {(p.stock_actual ?? 0) <= 0 ? "Sin stock" : `Stock: ${p.stock_actual}`}
                       </p>
                     ) : (
                       <span className="mt-0.5 inline-block rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">Menú</span>

@@ -9,6 +9,9 @@ interface ProductoHit {
   precio_venta: number;
   imagen_url: string | null;
   categoria_nombre: string | null;
+  /** true = reventa (muestra stock); false = menú/elaborado (badge "Menú"). */
+  controla_stock: boolean;
+  stock_actual: number;
 }
 
 function formatGs(v: number) {
@@ -21,8 +24,15 @@ export default function MesaProductPicker({
 }: {
   open: boolean;
   onClose: () => void;
-  /** Devuelve true si se agregó OK (deja el modal abierto para seguir cargando). */
-  onAdd: (productoId: string, cantidad: number, observacion: string | null) => Promise<boolean>;
+  /**
+   * Agrega un producto. Devuelve true si se aceptó (optimista). Recibe datos del
+   * producto para render instantáneo en la lista de la mesa.
+   */
+  onAdd: (
+    producto: { id: string; nombre: string; precio_venta: number },
+    cantidad: number,
+    observacion: string | null
+  ) => Promise<boolean>;
 }) {
   const [productos, setProductos] = useState<ProductoHit[]>([]);
   const [loading, setLoading] = useState(false);
@@ -31,7 +41,6 @@ export default function MesaProductPicker({
   const [sel, setSel] = useState<ProductoHit | null>(null);
   const [cant, setCant] = useState(1);
   const [obs, setObs] = useState("");
-  const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const loadedRef = useRef(false);
 
@@ -70,14 +79,12 @@ export default function MesaProductPicker({
 
   async function confirmar() {
     if (!sel) return;
-    setSaving(true);
-    const ok = await onAdd(sel.id, cant, obs.trim() || null);
-    setSaving(false);
-    if (ok) {
-      setFeedback(`${sel.nombre} agregado ✓`);
-      setSel(null);
-      setTimeout(() => setFeedback(null), 1500);
-    }
+    const prod = sel;
+    // Optimista: el agregado aparece instantáneo en la mesa; no bloqueamos el modal.
+    setFeedback(`${prod.nombre} agregado ✓`);
+    setSel(null);
+    setTimeout(() => setFeedback(null), 1500);
+    void onAdd({ id: prod.id, nombre: prod.nombre, precio_venta: prod.precio_venta }, cant, obs.trim() || null);
   }
 
   return (
@@ -127,6 +134,14 @@ export default function MesaProductPicker({
                   <div className="p-2">
                     <p className="line-clamp-2 text-sm font-medium text-slate-800">{p.nombre}</p>
                     <p className="mt-0.5 text-sm font-bold text-[#0EA5E9]">{formatGs(p.precio_venta)}</p>
+                    {/* Reventa → stock; menú/elaborado → badge (no se bloquea por stock). */}
+                    {p.controla_stock ? (
+                      <p className={`mt-0.5 text-[11px] font-medium ${p.stock_actual <= 0 ? "text-red-500" : "text-slate-500"}`}>
+                        {p.stock_actual <= 0 ? "Sin stock" : `Stock: ${p.stock_actual}`}
+                      </p>
+                    ) : (
+                      <span className="mt-0.5 inline-block rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">Menú</span>
+                    )}
                   </div>
                 </button>
               ))}
@@ -154,8 +169,8 @@ export default function MesaProductPicker({
             />
             <div className="mt-3 flex gap-2">
               <button type="button" onClick={() => setSel(null)} className="rounded-lg border border-slate-200 px-4 py-3 text-sm">Cancelar</button>
-              <button type="button" onClick={confirmar} disabled={saving} className="flex-1 rounded-lg bg-[#0EA5E9] px-4 py-3 text-base font-semibold text-white hover:bg-[#0284C7] disabled:opacity-50">
-                {saving ? "Agregando…" : "Agregar a la mesa"}
+              <button type="button" onClick={confirmar} className="flex-1 rounded-lg bg-[#0EA5E9] px-4 py-3 text-base font-semibold text-white hover:bg-[#0284C7]">
+                Agregar a la mesa
               </button>
             </div>
           </div>

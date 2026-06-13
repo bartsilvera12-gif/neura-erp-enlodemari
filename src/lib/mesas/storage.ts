@@ -1,5 +1,5 @@
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
-import type { MesaConResumen, MesaDetalle } from "./types";
+import type { Comanda, MesaConResumen, MesaDetalle, MesaSesionItem } from "./types";
 
 type Ok<T> = { success: true } & T;
 type Err = { success: false; error: string };
@@ -31,13 +31,19 @@ export async function getMesaDetalle(mesaId: string): Promise<MesaDetalle | null
 }
 
 export function agregarItemMesa(mesaId: string, payload: { producto_id: string; cantidad: number; observacion: string | null }) {
-  return call<{ item: unknown }>(`/api/mesas/${encodeURIComponent(mesaId)}/items`, "POST", payload);
+  return call<{ item: MesaSesionItem }>(`/api/mesas/${encodeURIComponent(mesaId)}/items`, "POST", payload);
 }
 
 export function actualizarItemMesa(itemId: string, payload: { cantidad?: number; observacion?: string | null; cancelar?: boolean }) {
-  return call<{ item: unknown }>(`/api/mesas/items/${encodeURIComponent(itemId)}`, "PATCH", payload);
+  return call<{ item: MesaSesionItem }>(`/api/mesas/items/${encodeURIComponent(itemId)}`, "PATCH", payload);
 }
 
+/** Envía los ítems pendientes a cocina (comanda). La mesa sigue ocupada. */
+export function enviarComandaMesa(mesaId: string) {
+  return call<{ comanda: Comanda }>(`/api/mesas/${encodeURIComponent(mesaId)}/comanda`, "POST", {});
+}
+
+/** Pedir cuenta / enviar a caja para cobrar (la mesa pasa a por_cobrar). */
 export function enviarMesaACaja(mesaId: string) {
   return call<{ sesion: unknown }>(`/api/mesas/${encodeURIComponent(mesaId)}/enviar-caja`, "POST", {});
 }

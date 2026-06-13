@@ -9,7 +9,13 @@
 
 export type EstadoMesa = "libre" | "ocupada" | "por_cobrar" | "cerrada" | "inactiva";
 export type EstadoSesion = "abierta" | "por_cobrar" | "facturada" | "cancelada";
-export type EstadoItemMesa = "activo" | "cancelado";
+/**
+ * Estado de un ítem de cuenta:
+ *  - pendiente: agregado por el mozo, aún no enviado a cocina (editable/cancelable).
+ *  - enviado: incluido en una comanda (cocina). Sigue contando en la cuenta.
+ *  - cancelado: anulado (no cuenta).
+ */
+export type EstadoItemMesa = "pendiente" | "enviado" | "cancelado";
 
 export interface Mesa {
   id: string;
@@ -42,6 +48,17 @@ export interface MesaSesionItem {
   total: number;
   observacion: string | null;
   estado: EstadoItemMesa;
+  comanda_id: string | null;
+  enviado_at: string | null;
+}
+
+/** Una comanda enviada a cocina (un envío de ítems de una sesión). */
+export interface Comanda {
+  id: string;
+  sesion_id: string;
+  numero: number;
+  created_at: string;
+  items_count: number;
 }
 
 /** Mesa + resumen de su sesión viva (para el grid y la lista por-cobrar). */

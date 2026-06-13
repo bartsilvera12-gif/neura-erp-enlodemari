@@ -6,6 +6,7 @@ import {
   type CreateVentaItemInput,
 } from "@/lib/ventas/server/create-venta-pg";
 import type {
+  Comanda,
   Mesa,
   MesaConResumen,
   MesaDetalle,
@@ -24,7 +25,10 @@ const MESA_COLS = "id, numero, nombre, estado, activo";
 const SESION_COLS =
   "id, mesa_id, estado, mozo_id, abierta_at, enviada_caja_at, cerrada_at, venta_id, observacion";
 const ITEM_COLS =
-  "id, sesion_id, producto_id, producto_nombre, sku, cantidad, precio_unitario, total, observacion, estado";
+  "id, sesion_id, producto_id, producto_nombre, sku, cantidad, precio_unitario, total, observacion, estado, comanda_id, enviado_at";
+
+/** Estados de ítem que cuentan en la cuenta (todo menos cancelado). */
+const ITEM_VIGENTES = ["pendiente", "enviado"];
 
 function mapMesa(r: Record<string, unknown>): Mesa {
   return {
@@ -60,6 +64,8 @@ function mapItem(r: Record<string, unknown>): MesaSesionItem {
     total: num(r.total),
     observacion: (r.observacion as string) ?? null,
     estado: r.estado as MesaSesionItem["estado"],
+    comanda_id: (r.comanda_id as string) ?? null,
+    enviado_at: (r.enviado_at as string) ?? null,
   };
 }
 
@@ -85,7 +91,7 @@ async function totalesPorSesion(sb: Sb, empresaId: string, sesionIds: string[]) 
     .from("mesa_sesion_items")
     .select("sesion_id, total")
     .eq("empresa_id", empresaId)
-    .eq("estado", "activo")
+    .in("estado", ITEM_VIGENTES)
     .in("sesion_id", sesionIds);
   if (iQ.error) throw new Error(iQ.error.message);
   for (const it of (iQ.data ?? []) as Array<{ sesion_id: string; total: number | string }>) {
@@ -162,7 +168,7 @@ export async function getMesaDetallePg(
       .select(ITEM_COLS)
       .eq("empresa_id", empresaId)
       .eq("sesion_id", sesion.id)
-      .eq("estado", "activo")
+      .in("estado", ITEM_VIGENTES)
       .order("created_at", { ascending: true });
     if (iQ.error) throw new Error(iQ.error.message);
     items = (iQ.data ?? []).map((r) => mapItem(r as Record<string, unknown>));
@@ -292,7 +298,7 @@ export async function agregarItemPg(params: {
       precio_unitario: precio,
       total,
       observacion: params.observacion,
-      estado: "activo",
+      estado: "pendiente",
       creado_por: params.creadoPor,
     })
     .select(ITEM_COLS)
@@ -314,18 +320,24 @@ export async function actualizarItemPg(params: {
   const sb = createServiceRoleClientWithDbSchema(params.schema);
   const cur = await sb
     .from("mesa_sesion_items")
-    .select("id, precio_unitario, cantidad, sesion_id")
+    .select("id, precio_unitario, cantidad, sesion_id, estado")
     .eq("empresa_id", params.empresaId)
     .eq("id", params.itemId)
     .maybeSingle();
   if (cur.error) throw new Error(cur.error.message);
   if (!cur.data) throw new Error("Ítem no encontrado.");
-  const row = cur.data as { precio_unitario: number | string; cantidad: number | string };
+  const row = cur.data as { precio_unitario: number | string; cantidad: number | string; estado: string };
+  if (row.estado === "cancelado") throw new Error("El producto ya fue cancelado.");
 
   const patch: Record<string, unknown> = {};
   if (params.cancelar) {
+    // Cancelar se permite en pendiente y enviado (no impacta stock/caja).
     patch.estado = "cancelado";
   } else {
+    // Editar cantidad/observación solo si el ítem aún NO fue enviado a comanda.
+    if (row.estado !== "pendiente") {
+      throw new Error("El producto ya fue enviado a comanda; no se puede editar.");
+    }
     if (params.cantidad != null) {
       const c = num(params.cantidad);
       if (c <= 0) throw new Error("La cantidad debe ser mayor a 0.");
@@ -359,7 +371,7 @@ export async function enviarACajaPg(schema: string, empresaId: string, mesaId: s
 
   const cnt = await sb
     .from("mesa_sesion_items").select("id", { count: "exact", head: true })
-    .eq("empresa_id", empresaId).eq("sesion_id", sesion.id).eq("estado", "activo");
+    .eq("empresa_id", empresaId).eq("sesion_id", sesion.id).in("estado", ITEM_VIGENTES);
   if ((cnt.count ?? 0) === 0) throw new Error("La cuenta no tiene productos.");
 
   const upd = await sb
@@ -370,6 +382,64 @@ export async function enviarACajaPg(schema: string, empresaId: string, mesaId: s
   if (upd.error) throw new Error(upd.error.message);
   await sb.from("mesas").update({ estado: "por_cobrar" }).eq("empresa_id", empresaId).eq("id", mesaId);
   return mapSesion(upd.data as Record<string, unknown>);
+}
+
+/**
+ * Envía a COCINA los ítems pendientes de la mesa como una nueva comanda.
+ * La mesa sigue ocupada/abierta. NO crea venta, NO toca caja ni stock.
+ */
+export async function enviarComandaPg(
+  schema: string,
+  empresaId: string,
+  mesaId: string,
+  usuarioId: string | null
+): Promise<Comanda> {
+  const sb = createServiceRoleClientWithDbSchema(schema);
+  const sQ = await sb
+    .from("mesa_sesiones").select("id, estado")
+    .eq("empresa_id", empresaId).eq("mesa_id", mesaId).eq("estado", "abierta").maybeSingle();
+  if (sQ.error) throw new Error(sQ.error.message);
+  if (!sQ.data) throw new Error("La mesa no tiene una cuenta abierta.");
+  const sesionId = (sQ.data as { id: string }).id;
+
+  // Ítems pendientes (aún no enviados a cocina).
+  const pQ = await sb
+    .from("mesa_sesion_items").select("id")
+    .eq("empresa_id", empresaId).eq("sesion_id", sesionId).eq("estado", "pendiente");
+  if (pQ.error) throw new Error(pQ.error.message);
+  const pendientes = (pQ.data ?? []) as Array<{ id: string }>;
+  if (pendientes.length === 0) throw new Error("No hay productos nuevos para enviar a comanda.");
+
+  // Número de comanda secuencial por sesión.
+  const maxQ = await sb
+    .from("comandas").select("numero")
+    .eq("empresa_id", empresaId).eq("sesion_id", sesionId)
+    .order("numero", { ascending: false }).limit(1);
+  if (maxQ.error) throw new Error(maxQ.error.message);
+  const numero = num((maxQ.data?.[0] as { numero?: number } | undefined)?.numero) + 1;
+
+  const ins = await sb
+    .from("comandas")
+    .insert({ empresa_id: empresaId, sesion_id: sesionId, numero, creado_por: usuarioId })
+    .select("id, sesion_id, numero, created_at")
+    .single();
+  if (ins.error) throw new Error(ins.error.message);
+  const comanda = ins.data as { id: string; sesion_id: string; numero: number; created_at: string };
+
+  // Marcar los pendientes como enviados, asociados a esta comanda.
+  const upd = await sb
+    .from("mesa_sesion_items")
+    .update({ estado: "enviado", comanda_id: comanda.id, enviado_at: new Date().toISOString() })
+    .eq("empresa_id", empresaId).eq("sesion_id", sesionId).eq("estado", "pendiente");
+  if (upd.error) throw new Error(upd.error.message);
+
+  return {
+    id: comanda.id,
+    sesion_id: comanda.sesion_id,
+    numero: comanda.numero,
+    created_at: comanda.created_at,
+    items_count: pendientes.length,
+  };
 }
 
 /** Cancela la cuenta viva: sesión → cancelada, mesa → libre. */
@@ -447,7 +517,7 @@ export async function facturarSesionPg(params: {
     const iQ = await sb
       .from("mesa_sesion_items")
       .select("producto_id, producto_nombre, sku, cantidad, precio_unitario")
-      .eq("empresa_id", params.empresaId).eq("sesion_id", ses.id).eq("estado", "activo");
+      .eq("empresa_id", params.empresaId).eq("sesion_id", ses.id).in("estado", ITEM_VIGENTES);
     if (iQ.error) throw new Error(iQ.error.message);
     const rows = (iQ.data ?? []) as Array<{
       producto_id: string; producto_nombre: string; sku: string | null;

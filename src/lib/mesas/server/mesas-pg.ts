@@ -1,0 +1,513 @@
+import { createServiceRoleClientWithDbSchema } from "@/lib/supabase/empresa-data-schema";
+import { calcularLineaVenta } from "@/lib/ventas/iva";
+import { getCajaAbiertaPg } from "@/lib/caja/server/caja-pg";
+import {
+  createVentaTransaccionalPg,
+  type CreateVentaItemInput,
+} from "@/lib/ventas/server/create-venta-pg";
+import type {
+  Mesa,
+  MesaConResumen,
+  MesaDetalle,
+  MesaSesion,
+  MesaSesionItem,
+} from "@/lib/mesas/types";
+
+type Sb = ReturnType<typeof createServiceRoleClientWithDbSchema>;
+
+function num(v: unknown): number {
+  const n = typeof v === "number" ? v : Number(v ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+const MESA_COLS = "id, numero, nombre, estado, activo";
+const SESION_COLS =
+  "id, mesa_id, estado, mozo_id, abierta_at, enviada_caja_at, cerrada_at, venta_id, observacion";
+const ITEM_COLS =
+  "id, sesion_id, producto_id, producto_nombre, sku, cantidad, precio_unitario, total, observacion, estado";
+
+function mapMesa(r: Record<string, unknown>): Mesa {
+  return {
+    id: String(r.id),
+    numero: num(r.numero),
+    nombre: (r.nombre as string) ?? null,
+    estado: r.estado as Mesa["estado"],
+    activo: r.activo !== false,
+  };
+}
+function mapSesion(r: Record<string, unknown>): MesaSesion {
+  return {
+    id: String(r.id),
+    mesa_id: String(r.mesa_id),
+    estado: r.estado as MesaSesion["estado"],
+    mozo_id: (r.mozo_id as string) ?? null,
+    abierta_at: r.abierta_at as string,
+    enviada_caja_at: (r.enviada_caja_at as string) ?? null,
+    cerrada_at: (r.cerrada_at as string) ?? null,
+    venta_id: (r.venta_id as string) ?? null,
+    observacion: (r.observacion as string) ?? null,
+  };
+}
+function mapItem(r: Record<string, unknown>): MesaSesionItem {
+  return {
+    id: String(r.id),
+    sesion_id: String(r.sesion_id),
+    producto_id: String(r.producto_id),
+    producto_nombre: (r.producto_nombre as string) ?? "",
+    sku: (r.sku as string) ?? null,
+    cantidad: num(r.cantidad),
+    precio_unitario: num(r.precio_unitario),
+    total: num(r.total),
+    observacion: (r.observacion as string) ?? null,
+    estado: r.estado as MesaSesionItem["estado"],
+  };
+}
+
+async function resolveMozoNombres(sb: Sb, ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const uniq = [...new Set(ids.filter(Boolean))];
+  if (!uniq.length) return out;
+  try {
+    const q = await sb.from("usuarios").select("id, nombre").in("id", uniq);
+    if (!q.error) for (const u of (q.data ?? []) as Array<{ id: string; nombre: string | null }>) {
+      if (u.nombre) out.set(u.id, u.nombre);
+    }
+  } catch { /* opcional */ }
+  return out;
+}
+
+/** Totales de una sesión a partir de sus ítems activos. */
+async function totalesPorSesion(sb: Sb, empresaId: string, sesionIds: string[]) {
+  const totalBy = new Map<string, number>();
+  const countBy = new Map<string, number>();
+  if (!sesionIds.length) return { totalBy, countBy };
+  const iQ = await sb
+    .from("mesa_sesion_items")
+    .select("sesion_id, total")
+    .eq("empresa_id", empresaId)
+    .eq("estado", "activo")
+    .in("sesion_id", sesionIds);
+  if (iQ.error) throw new Error(iQ.error.message);
+  for (const it of (iQ.data ?? []) as Array<{ sesion_id: string; total: number | string }>) {
+    totalBy.set(it.sesion_id, (totalBy.get(it.sesion_id) ?? 0) + num(it.total));
+    countBy.set(it.sesion_id, (countBy.get(it.sesion_id) ?? 0) + 1);
+  }
+  return { totalBy, countBy };
+}
+
+// ── Lecturas ──────────────────────────────────────────────────────────────────
+
+/** Todas las mesas (activas) con el resumen de su sesión viva. */
+export async function listarMesasPg(schema: string, empresaId: string): Promise<MesaConResumen[]> {
+  const sb = createServiceRoleClientWithDbSchema(schema);
+  const mQ = await sb
+    .from("mesas")
+    .select(MESA_COLS)
+    .eq("empresa_id", empresaId)
+    .eq("activo", true)
+    .order("numero", { ascending: true });
+  if (mQ.error) throw new Error(mQ.error.message);
+  const mesas = (mQ.data ?? []).map((r) => mapMesa(r as Record<string, unknown>));
+
+  const sQ = await sb
+    .from("mesa_sesiones")
+    .select(SESION_COLS)
+    .eq("empresa_id", empresaId)
+    .in("estado", ["abierta", "por_cobrar"]);
+  if (sQ.error) throw new Error(sQ.error.message);
+  const sesiones = (sQ.data ?? []).map((r) => mapSesion(r as Record<string, unknown>));
+  const sesionByMesa = new Map(sesiones.map((s) => [s.mesa_id, s]));
+
+  const { totalBy, countBy } = await totalesPorSesion(sb, empresaId, sesiones.map((s) => s.id));
+  const mozoNombres = await resolveMozoNombres(sb, sesiones.map((s) => s.mozo_id ?? "").filter(Boolean));
+
+  return mesas.map((mesa) => {
+    const sesion = sesionByMesa.get(mesa.id) ?? null;
+    return {
+      mesa,
+      sesion,
+      total: sesion ? totalBy.get(sesion.id) ?? 0 : 0,
+      items_count: sesion ? countBy.get(sesion.id) ?? 0 : 0,
+      mozo_nombre: sesion?.mozo_id ? mozoNombres.get(sesion.mozo_id) ?? null : null,
+    };
+  });
+}
+
+/** Detalle de una mesa: sesión viva + ítems activos. */
+export async function getMesaDetallePg(
+  schema: string,
+  empresaId: string,
+  mesaId: string
+): Promise<MesaDetalle | null> {
+  const sb = createServiceRoleClientWithDbSchema(schema);
+  const mQ = await sb.from("mesas").select(MESA_COLS).eq("empresa_id", empresaId).eq("id", mesaId).maybeSingle();
+  if (mQ.error) throw new Error(mQ.error.message);
+  if (!mQ.data) return null;
+  const mesa = mapMesa(mQ.data as Record<string, unknown>);
+
+  const sQ = await sb
+    .from("mesa_sesiones")
+    .select(SESION_COLS)
+    .eq("empresa_id", empresaId)
+    .eq("mesa_id", mesaId)
+    .in("estado", ["abierta", "por_cobrar"])
+    .maybeSingle();
+  if (sQ.error) throw new Error(sQ.error.message);
+  const sesion = sQ.data ? mapSesion(sQ.data as Record<string, unknown>) : null;
+
+  let items: MesaSesionItem[] = [];
+  if (sesion) {
+    const iQ = await sb
+      .from("mesa_sesion_items")
+      .select(ITEM_COLS)
+      .eq("empresa_id", empresaId)
+      .eq("sesion_id", sesion.id)
+      .eq("estado", "activo")
+      .order("created_at", { ascending: true });
+    if (iQ.error) throw new Error(iQ.error.message);
+    items = (iQ.data ?? []).map((r) => mapItem(r as Record<string, unknown>));
+  }
+  const total = items.reduce((s, it) => s + it.total, 0);
+  return { mesa, sesion, items, total };
+}
+
+/** Sesiones por cobrar (lista para caja). */
+export async function listarPorCobrarPg(schema: string, empresaId: string): Promise<MesaConResumen[]> {
+  const sb = createServiceRoleClientWithDbSchema(schema);
+  const sQ = await sb
+    .from("mesa_sesiones")
+    .select(SESION_COLS)
+    .eq("empresa_id", empresaId)
+    .eq("estado", "por_cobrar")
+    .order("enviada_caja_at", { ascending: true });
+  if (sQ.error) throw new Error(sQ.error.message);
+  const sesiones = (sQ.data ?? []).map((r) => mapSesion(r as Record<string, unknown>));
+  if (!sesiones.length) return [];
+
+  const mesaIds = [...new Set(sesiones.map((s) => s.mesa_id))];
+  const mQ = await sb.from("mesas").select(MESA_COLS).eq("empresa_id", empresaId).in("id", mesaIds);
+  if (mQ.error) throw new Error(mQ.error.message);
+  const mesaById = new Map(((mQ.data ?? []).map((r) => mapMesa(r as Record<string, unknown>))).map((m) => [m.id, m]));
+
+  const { totalBy, countBy } = await totalesPorSesion(sb, empresaId, sesiones.map((s) => s.id));
+  const mozoNombres = await resolveMozoNombres(sb, sesiones.map((s) => s.mozo_id ?? "").filter(Boolean));
+
+  return sesiones.map((sesion) => ({
+    mesa: mesaById.get(sesion.mesa_id) ?? { id: sesion.mesa_id, numero: 0, nombre: null, estado: "por_cobrar", activo: true },
+    sesion,
+    total: totalBy.get(sesion.id) ?? 0,
+    items_count: countBy.get(sesion.id) ?? 0,
+    mozo_nombre: sesion.mozo_id ? mozoNombres.get(sesion.mozo_id) ?? null : null,
+  }));
+}
+
+// ── Escrituras ────────────────────────────────────────────────────────────────
+
+/** Devuelve la sesión viva de la mesa o crea una nueva (mesa → ocupada). */
+async function ensureSesionAbierta(
+  sb: Sb,
+  empresaId: string,
+  mesaId: string,
+  mozoId: string | null
+): Promise<MesaSesion> {
+  const existing = await sb
+    .from("mesa_sesiones")
+    .select(SESION_COLS)
+    .eq("empresa_id", empresaId)
+    .eq("mesa_id", mesaId)
+    .in("estado", ["abierta", "por_cobrar"])
+    .maybeSingle();
+  if (existing.error) throw new Error(existing.error.message);
+  if (existing.data) return mapSesion(existing.data as Record<string, unknown>);
+
+  const ins = await sb
+    .from("mesa_sesiones")
+    .insert({ empresa_id: empresaId, mesa_id: mesaId, estado: "abierta", mozo_id: mozoId })
+    .select(SESION_COLS)
+    .single();
+  if (ins.error) {
+    if (ins.error.code === "23505") {
+      // Carrera: otra request creó la sesión; devolvemos la viva.
+      const again = await sb
+        .from("mesa_sesiones").select(SESION_COLS)
+        .eq("empresa_id", empresaId).eq("mesa_id", mesaId)
+        .in("estado", ["abierta", "por_cobrar"]).maybeSingle();
+      if (again.data) return mapSesion(again.data as Record<string, unknown>);
+    }
+    throw new Error(ins.error.message);
+  }
+  await sb.from("mesas").update({ estado: "ocupada" }).eq("empresa_id", empresaId).eq("id", mesaId);
+  return mapSesion(ins.data as Record<string, unknown>);
+}
+
+export async function abrirMesaPg(
+  schema: string,
+  empresaId: string,
+  mesaId: string,
+  mozoId: string | null
+): Promise<MesaSesion> {
+  const sb = createServiceRoleClientWithDbSchema(schema);
+  return ensureSesionAbierta(sb, empresaId, mesaId, mozoId);
+}
+
+export async function agregarItemPg(params: {
+  schema: string;
+  empresaId: string;
+  mesaId: string;
+  productoId: string;
+  cantidad: number;
+  observacion: string | null;
+  creadoPor: string | null;
+}): Promise<MesaSesionItem> {
+  const sb = createServiceRoleClientWithDbSchema(params.schema);
+  const sesion = await ensureSesionAbierta(sb, params.empresaId, params.mesaId, params.creadoPor);
+  if (sesion.estado !== "abierta") {
+    throw new Error("La cuenta ya fue enviada a caja; no se pueden agregar más productos.");
+  }
+
+  const pQ = await sb
+    .from("productos")
+    .select("id, nombre, sku, precio_venta")
+    .eq("empresa_id", params.empresaId)
+    .eq("id", params.productoId)
+    .maybeSingle();
+  if (pQ.error) throw new Error(pQ.error.message);
+  if (!pQ.data) throw new Error("Producto no encontrado en esta empresa.");
+  const prod = pQ.data as { nombre: string; sku: string | null; precio_venta: number | string };
+
+  const cantidad = num(params.cantidad);
+  if (cantidad <= 0) throw new Error("La cantidad debe ser mayor a 0.");
+  const precio = num(prod.precio_venta);
+  const total = Math.round(precio * cantidad);
+
+  const ins = await sb
+    .from("mesa_sesion_items")
+    .insert({
+      empresa_id: params.empresaId,
+      sesion_id: sesion.id,
+      producto_id: params.productoId,
+      producto_nombre: prod.nombre,
+      sku: prod.sku,
+      cantidad,
+      precio_unitario: precio,
+      total,
+      observacion: params.observacion,
+      estado: "activo",
+      creado_por: params.creadoPor,
+    })
+    .select(ITEM_COLS)
+    .single();
+  if (ins.error) throw new Error(ins.error.message);
+  // Asegurar mesa ocupada (por si venía 'libre' y la sesión ya existía).
+  await sb.from("mesas").update({ estado: "ocupada" }).eq("empresa_id", params.empresaId).eq("id", params.mesaId).eq("estado", "libre");
+  return mapItem(ins.data as Record<string, unknown>);
+}
+
+export async function actualizarItemPg(params: {
+  schema: string;
+  empresaId: string;
+  itemId: string;
+  cantidad?: number;
+  observacion?: string | null;
+  cancelar?: boolean;
+}): Promise<MesaSesionItem> {
+  const sb = createServiceRoleClientWithDbSchema(params.schema);
+  const cur = await sb
+    .from("mesa_sesion_items")
+    .select("id, precio_unitario, cantidad, sesion_id")
+    .eq("empresa_id", params.empresaId)
+    .eq("id", params.itemId)
+    .maybeSingle();
+  if (cur.error) throw new Error(cur.error.message);
+  if (!cur.data) throw new Error("Ítem no encontrado.");
+  const row = cur.data as { precio_unitario: number | string; cantidad: number | string };
+
+  const patch: Record<string, unknown> = {};
+  if (params.cancelar) {
+    patch.estado = "cancelado";
+  } else {
+    if (params.cantidad != null) {
+      const c = num(params.cantidad);
+      if (c <= 0) throw new Error("La cantidad debe ser mayor a 0.");
+      patch.cantidad = c;
+      patch.total = Math.round(num(row.precio_unitario) * c);
+    }
+    if (params.observacion !== undefined) patch.observacion = params.observacion;
+  }
+  if (Object.keys(patch).length === 0) throw new Error("Nada para actualizar.");
+
+  const upd = await sb
+    .from("mesa_sesion_items")
+    .update(patch)
+    .eq("empresa_id", params.empresaId)
+    .eq("id", params.itemId)
+    .select(ITEM_COLS)
+    .single();
+  if (upd.error) throw new Error(upd.error.message);
+  return mapItem(upd.data as Record<string, unknown>);
+}
+
+/** Envía la cuenta a caja: sesión y mesa → por_cobrar. */
+export async function enviarACajaPg(schema: string, empresaId: string, mesaId: string): Promise<MesaSesion> {
+  const sb = createServiceRoleClientWithDbSchema(schema);
+  const sQ = await sb
+    .from("mesa_sesiones").select(SESION_COLS)
+    .eq("empresa_id", empresaId).eq("mesa_id", mesaId).eq("estado", "abierta").maybeSingle();
+  if (sQ.error) throw new Error(sQ.error.message);
+  if (!sQ.data) throw new Error("La mesa no tiene una cuenta abierta para enviar a caja.");
+  const sesion = mapSesion(sQ.data as Record<string, unknown>);
+
+  const cnt = await sb
+    .from("mesa_sesion_items").select("id", { count: "exact", head: true })
+    .eq("empresa_id", empresaId).eq("sesion_id", sesion.id).eq("estado", "activo");
+  if ((cnt.count ?? 0) === 0) throw new Error("La cuenta no tiene productos.");
+
+  const upd = await sb
+    .from("mesa_sesiones")
+    .update({ estado: "por_cobrar", enviada_caja_at: new Date().toISOString() })
+    .eq("empresa_id", empresaId).eq("id", sesion.id).eq("estado", "abierta")
+    .select(SESION_COLS).single();
+  if (upd.error) throw new Error(upd.error.message);
+  await sb.from("mesas").update({ estado: "por_cobrar" }).eq("empresa_id", empresaId).eq("id", mesaId);
+  return mapSesion(upd.data as Record<string, unknown>);
+}
+
+/** Cancela la cuenta viva: sesión → cancelada, mesa → libre. */
+export async function cancelarSesionPg(schema: string, empresaId: string, mesaId: string): Promise<void> {
+  const sb = createServiceRoleClientWithDbSchema(schema);
+  const sQ = await sb
+    .from("mesa_sesiones").select("id, venta_id")
+    .eq("empresa_id", empresaId).eq("mesa_id", mesaId).in("estado", ["abierta", "por_cobrar"]).maybeSingle();
+  if (sQ.error) throw new Error(sQ.error.message);
+  if (!sQ.data) throw new Error("La mesa no tiene una cuenta para cancelar.");
+  if ((sQ.data as { venta_id: string | null }).venta_id) throw new Error("La cuenta ya fue facturada; no se puede cancelar.");
+  const sesionId = (sQ.data as { id: string }).id;
+
+  const upd = await sb
+    .from("mesa_sesiones")
+    .update({ estado: "cancelada", cerrada_at: new Date().toISOString() })
+    .eq("empresa_id", empresaId).eq("id", sesionId).is("venta_id", null);
+  if (upd.error) throw new Error(upd.error.message);
+  await sb.from("mesas").update({ estado: "libre" }).eq("empresa_id", empresaId).eq("id", mesaId);
+}
+
+/**
+ * Factura una sesión: crea la venta (reutilizando createVentaTransaccionalPg) y
+ * la asocia a la caja abierta. IDEMPOTENTE: si la sesión ya tiene venta_id, la
+ * devuelve sin crear otra. Exige caja abierta. Descuenta stock vía la lógica de
+ * ventas (no antes).
+ */
+export async function facturarSesionPg(params: {
+  schema: string;
+  empresaId: string;
+  sesionId: string;
+  metodoPago: "efectivo" | "tarjeta" | "transferencia";
+  usuarioId: string | null;
+}): Promise<{ ventaId: string; numeroControl: string | null; yaFacturada: boolean }> {
+  const sb = createServiceRoleClientWithDbSchema(params.schema);
+
+  const sQ = await sb
+    .from("mesa_sesiones").select("id, mesa_id, estado, venta_id")
+    .eq("empresa_id", params.empresaId).eq("id", params.sesionId).maybeSingle();
+  if (sQ.error) throw new Error(sQ.error.message);
+  if (!sQ.data) throw new Error("Sesión de mesa no encontrada.");
+  const ses = sQ.data as { id: string; mesa_id: string; estado: string; venta_id: string | null };
+
+  // Idempotencia: ya facturada.
+  if (ses.venta_id) return { ventaId: ses.venta_id, numeroControl: null, yaFacturada: true };
+  if (ses.estado === "cancelada") throw new Error("La cuenta fue cancelada.");
+
+  // Exigir caja abierta (igual que una venta normal).
+  const caja = await getCajaAbiertaPg(params.schema, params.empresaId);
+  if (!caja) throw new Error("Para vender primero tenés que abrir caja.");
+
+  // Claim atómico: tomamos la sesión sólo si sigue viva y sin venta.
+  const claim = await sb
+    .from("mesa_sesiones")
+    .update({ estado: "facturada", cerrada_at: new Date().toISOString() })
+    .eq("empresa_id", params.empresaId).eq("id", ses.id)
+    .is("venta_id", null).in("estado", ["abierta", "por_cobrar"])
+    .select("id, mesa_id");
+  if (claim.error) throw new Error(claim.error.message);
+  if (!claim.data || claim.data.length === 0) {
+    // Otra request la tomó: devolver la venta existente si ya está.
+    const re = await sb.from("mesa_sesiones").select("venta_id").eq("id", ses.id).maybeSingle();
+    const vid = (re.data as { venta_id: string | null } | null)?.venta_id ?? null;
+    if (vid) return { ventaId: vid, numeroControl: null, yaFacturada: true };
+    throw new Error("La mesa ya se está facturando. Reintentá en unos segundos.");
+  }
+
+  const revert = async () => {
+    await sb.from("mesa_sesiones").update({ estado: "por_cobrar", cerrada_at: null })
+      .eq("empresa_id", params.empresaId).eq("id", ses.id).is("venta_id", null);
+  };
+
+  try {
+    // Ítems activos de la sesión.
+    const iQ = await sb
+      .from("mesa_sesion_items")
+      .select("producto_id, producto_nombre, sku, cantidad, precio_unitario")
+      .eq("empresa_id", params.empresaId).eq("sesion_id", ses.id).eq("estado", "activo");
+    if (iQ.error) throw new Error(iQ.error.message);
+    const rows = (iQ.data ?? []) as Array<{
+      producto_id: string; producto_nombre: string; sku: string | null;
+      cantidad: number | string; precio_unitario: number | string;
+    }>;
+    if (!rows.length) throw new Error("La mesa no tiene productos para facturar.");
+
+    // Construir ítems de venta (IVA INCLUIDO 10%, recalculado por la lógica de ventas).
+    const items: CreateVentaItemInput[] = rows.map((r) => {
+      const cantidad = num(r.cantidad);
+      const precio = num(r.precio_unitario);
+      const d = calcularLineaVenta(precio, cantidad, "10%");
+      return {
+        producto_id: r.producto_id,
+        producto_nombre: r.producto_nombre,
+        sku: r.sku ?? "",
+        cantidad,
+        precio_venta_original: precio,
+        precio_venta: precio,
+        tipo_iva: "10%",
+        subtotal: d.subtotal,
+        monto_iva: d.monto_iva,
+        total_linea: d.total_linea,
+      };
+    });
+    let sub = 0, iva = 0, tot = 0;
+    for (const it of items) { sub += it.subtotal; iva += it.monto_iva; tot += it.total_linea; }
+
+    // Nº de mesa para la observación.
+    const mQ = await sb.from("mesas").select("numero").eq("id", ses.mesa_id).maybeSingle();
+    const numeroMesa = (mQ.data as { numero: number } | null)?.numero ?? null;
+
+    const { ventaId, numeroControl } = await createVentaTransaccionalPg({
+      schema: params.schema,
+      empresaId: params.empresaId,
+      clienteId: null,
+      observaciones: numeroMesa != null ? `Mesa ${numeroMesa}` : "Mesa",
+      moneda: "GS",
+      tipoCambio: 1,
+      tipoVenta: "CONTADO",
+      plazoDias: null,
+      metodoPago: params.metodoPago,
+      items,
+      subtotalDeclarado: sub,
+      montoIvaDeclarado: iva,
+      totalDeclarado: tot,
+      pedidoCocina: null, // la comida ya fue preparada/servida: no se crea comanda de cocina
+      cajaId: caja.id,
+    });
+
+    // Persistir venta_id + liberar mesa.
+    const setVenta = await sb
+      .from("mesa_sesiones").update({ venta_id: ventaId })
+      .eq("empresa_id", params.empresaId).eq("id", ses.id).is("venta_id", null).select("id");
+    if (setVenta.error) throw new Error(setVenta.error.message);
+    await sb.from("mesas").update({ estado: "libre" }).eq("empresa_id", params.empresaId).eq("id", ses.mesa_id);
+
+    return { ventaId, numeroControl, yaFacturada: false };
+  } catch (err) {
+    await revert().catch(() => {});
+    throw err;
+  }
+}

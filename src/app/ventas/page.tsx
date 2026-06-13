@@ -6,6 +6,7 @@ import EdgeScrollArea from "@/components/ui/EdgeScrollArea";
 import { FancySelect } from "@/components/ui/FancySelect";
 import MobileFab from "@/components/ui/MobileFab";
 import CajaControlPanel from "@/components/caja/CajaControlPanel";
+import MesasPorCobrarCajaCard from "@/components/mesas/MesasPorCobrarCajaCard";
 import { getVentas } from "@/lib/ventas/storage";
 import type { Venta, TipoVenta, TipoIvaVenta } from "@/lib/ventas/types";
 import { sectoresParaTicket, sectoresCocinaParaComanda } from "@/lib/ventas/sector-tickets";
@@ -264,6 +265,9 @@ export default function VentasPage() {
 
       {/* Estado de caja por turno: abrir/cerrar caja + movimientos. */}
       <CajaControlPanel onStateChange={setCajaAbierta} />
+
+      {/* Mesas enviadas por mozos esperando cobro. */}
+      <MesasPorCobrarCajaCard />
 
       {/* ── Métricas del día ──────────────────────────────────────────────────── */}
       <div>

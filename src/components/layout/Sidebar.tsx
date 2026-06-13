@@ -35,6 +35,7 @@ import {
   Utensils,
   BarChart3,
   LayoutGrid,
+  ClipboardList,
 } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
@@ -117,6 +118,7 @@ const MENU_STRUCTURE: MenuItem[] = [
     icon: Activity,
   },
   { key: "mesas", slug: "mesas", label: "Mesas", href: "/mesas", icon: LayoutGrid },
+  { key: "comandas", slug: "comandas", label: "Comandas", href: "/comandas", icon: ClipboardList },
   { key: "ventas", slug: "ventas", label: "Caja", href: "/ventas", icon: ShoppingCart },
   { key: "reportes", slug: "reportes", label: "Reportes", href: "/reportes", icon: BarChart3 },
   {

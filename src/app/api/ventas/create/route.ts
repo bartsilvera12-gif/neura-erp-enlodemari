@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserAndEmpresa } from "@/lib/middleware/auth";
+import { requireModule } from "@/lib/middleware/require-module";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { createVentaTransaccionalPg } from "@/lib/ventas/server/create-venta-pg";
 import type { CreateVentaItemInput } from "@/lib/ventas/server/create-venta-pg";
@@ -90,10 +90,9 @@ function toVentaResponse(
  */
 export async function POST(request: NextRequest) {
   try {
-    const auth = await getUserAndEmpresa(request);
-    if (!auth) {
-      return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
-    }
+    const gate = await requireModule(request, "ventas");
+    if (!gate.ok) return NextResponse.json(errorResponse(gate.error), { status: gate.status });
+    const auth = gate.auth;
 
     let body: unknown;
     try {

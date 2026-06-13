@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserAndEmpresa } from "@/lib/middleware/auth";
+import { requireModule } from "@/lib/middleware/require-module";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { facturarSesionPg } from "@/lib/mesas/server/mesas-pg";
 import { successResponse, errorResponse } from "@/lib/api/response";
-import { API_ERRORS } from "@/lib/api/errors";
 
 /**
  * POST /api/mesas/sesiones/[id]/facturar — convierte la cuenta en venta.
@@ -11,8 +10,9 @@ import { API_ERRORS } from "@/lib/api/errors";
  */
 export async function POST(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
-    const auth = await getUserAndEmpresa(request);
-    if (!auth) return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
+    const gate = await requireModule(request, "ventas");
+    if (!gate.ok) return NextResponse.json(errorResponse(gate.error), { status: gate.status });
+    const auth = gate.auth;
     const { id } = await ctx.params;
 
     let body: unknown = {};

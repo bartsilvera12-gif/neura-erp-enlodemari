@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserAndEmpresa } from "@/lib/middleware/auth";
+import { requireModule } from "@/lib/middleware/require-module";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { abrirCajaPg } from "@/lib/caja/server/caja-pg";
 import { successResponse, errorResponse } from "@/lib/api/response";
-import { API_ERRORS } from "@/lib/api/errors";
 
 /** POST /api/caja/abrir — abre una caja con monto inicial. */
 export async function POST(request: NextRequest) {
   try {
-    const auth = await getUserAndEmpresa(request);
-    if (!auth) return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
+    const gate = await requireModule(request, "ventas");
+    if (!gate.ok) return NextResponse.json(errorResponse(gate.error), { status: gate.status });
+    const auth = gate.auth;
 
     let body: unknown;
     try {

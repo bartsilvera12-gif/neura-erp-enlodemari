@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserAndEmpresa } from "@/lib/middleware/auth";
+import { requireModule } from "@/lib/middleware/require-module";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { getResumenCajaPg, getCajaAbiertaPg } from "@/lib/caja/server/caja-pg";
 import { successResponse, errorResponse } from "@/lib/api/response";
-import { API_ERRORS } from "@/lib/api/errors";
 
 /**
  * GET /api/caja/resumen?caja_id=... — arqueo/resumen de una caja.
@@ -11,8 +10,9 @@ import { API_ERRORS } from "@/lib/api/errors";
  */
 export async function GET(request: NextRequest) {
   try {
-    const auth = await getUserAndEmpresa(request);
-    if (!auth) return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
+    const gate = await requireModule(request, "ventas");
+    if (!gate.ok) return NextResponse.json(errorResponse(gate.error), { status: gate.status });
+    const auth = gate.auth;
     const schema = await fetchDataSchemaForEmpresaId(auth.empresa_id);
 
     const url = new URL(request.url);

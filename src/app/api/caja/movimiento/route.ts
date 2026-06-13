@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserAndEmpresa } from "@/lib/middleware/auth";
+import { requireModule } from "@/lib/middleware/require-module";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { registrarMovimientoPg, getCajaAbiertaPg } from "@/lib/caja/server/caja-pg";
 import { successResponse, errorResponse } from "@/lib/api/response";
-import { API_ERRORS } from "@/lib/api/errors";
 import type { MedioPagoCaja, TipoMovimientoCaja } from "@/lib/caja/types";
 
 const TIPOS: TipoMovimientoCaja[] = ["ingreso", "egreso", "retiro", "ajuste"];
@@ -12,8 +11,9 @@ const MEDIOS: MedioPagoCaja[] = ["efectivo", "tarjeta", "transferencia", "otro"]
 /** POST /api/caja/movimiento — registra ingreso/egreso/retiro/ajuste en la caja abierta. */
 export async function POST(request: NextRequest) {
   try {
-    const auth = await getUserAndEmpresa(request);
-    if (!auth) return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
+    const gate = await requireModule(request, "ventas");
+    if (!gate.ok) return NextResponse.json(errorResponse(gate.error), { status: gate.status });
+    const auth = gate.auth;
 
     let body: unknown;
     try {

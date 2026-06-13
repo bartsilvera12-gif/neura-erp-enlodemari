@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserAndEmpresa } from "@/lib/middleware/auth";
+import { requireModule } from "@/lib/middleware/require-module";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { actualizarItemPg } from "@/lib/mesas/server/mesas-pg";
 import { successResponse, errorResponse } from "@/lib/api/response";
-import { API_ERRORS } from "@/lib/api/errors";
 
 /** PATCH /api/mesas/items/[itemId] — actualiza cantidad/observación o cancela el ítem. */
 export async function PATCH(request: NextRequest, ctx: { params: Promise<{ itemId: string }> }) {
   try {
-    const auth = await getUserAndEmpresa(request);
-    if (!auth) return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
+    const gate = await requireModule(request, "mesas");
+    if (!gate.ok) return NextResponse.json(errorResponse(gate.error), { status: gate.status });
+    const auth = gate.auth;
     const { itemId } = await ctx.params;
 
     let body: unknown;

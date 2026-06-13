@@ -19,8 +19,11 @@
  *     llama getModuleAccessCached({ forceRefresh: true }) por si cambió user.
  */
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
+import { supabase } from "@/lib/supabase";
 
-const CACHE_KEY = "neura.moduleAccess.v1";
+// v2: el cache ahora se scopea por user id. Subir la versión invalida cualquier
+// entrada v1 vieja (que no distinguía usuario) en todos los browsers al deploy.
+const CACHE_KEY = "neura.moduleAccess.v2";
 const TTL_MS = 10 * 60 * 1000; // 10 minutos
 
 export type ModuleAccessResponse = {
@@ -34,9 +37,25 @@ export type ModuleAccessResponse = {
 type CachedEntry = {
   data: ModuleAccessResponse;
   expiresAt: number;
+  /** user id (auth) dueño de estos módulos. Evita servir el cache de un usuario a otro. */
+  userId: string | null;
 };
 
-function readCache(): ModuleAccessResponse | null {
+/** user id de la sesión actual (local, sin red). */
+async function currentAuthUserId(): Promise<string | null> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data.session?.user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Lee el cache. Si se pasa `expectedUserId`, solo lo sirve cuando coincide con
+ * el dueño guardado (si no, lo descarta: era de otro usuario en este browser).
+ */
+function readCache(expectedUserId?: string | null): ModuleAccessResponse | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(CACHE_KEY);
@@ -47,16 +66,20 @@ function readCache(): ModuleAccessResponse | null {
       window.localStorage.removeItem(CACHE_KEY);
       return null;
     }
+    if (expectedUserId !== undefined && (parsed.userId ?? null) !== (expectedUserId ?? null)) {
+      // Cache de otro usuario (o sin dueño): no servir.
+      return null;
+    }
     return parsed.data;
   } catch {
     return null;
   }
 }
 
-function writeCache(data: ModuleAccessResponse): void {
+function writeCache(data: ModuleAccessResponse, userId: string | null): void {
   if (typeof window === "undefined") return;
   try {
-    const entry: CachedEntry = { data, expiresAt: Date.now() + TTL_MS };
+    const entry: CachedEntry = { data, expiresAt: Date.now() + TTL_MS, userId };
     window.localStorage.setItem(CACHE_KEY, JSON.stringify(entry));
   } catch {
     /* localStorage lleno o deshabilitado; degradar silenciosamente */
@@ -92,8 +115,10 @@ export function peekModuleAccessCache(): ModuleAccessResponse | null {
 export async function getModuleAccessCached(opts?: {
   forceRefresh?: boolean;
 }): Promise<{ ok: boolean; data: ModuleAccessResponse }> {
+  const userId = await currentAuthUserId();
+
   if (!opts?.forceRefresh) {
-    const cached = readCache();
+    const cached = readCache(userId);
     if (cached) return { ok: true, data: cached };
   }
 
@@ -105,7 +130,7 @@ export async function getModuleAccessCached(opts?: {
       return { ok: false, data: {} };
     }
     const data = (await res.json()) as ModuleAccessResponse;
-    writeCache(data);
+    writeCache(data, userId);
     return { ok: true, data };
   } catch {
     return { ok: false, data: {} };

@@ -102,7 +102,7 @@ export default function ConciliacionPage() {
             <table className="w-full min-w-[1100px] text-left text-sm">
               <thead><tr className="bg-slate-50 text-xs font-semibold text-slate-600">
                 <th className="px-3 py-2.5">Fecha</th><th className="px-3 py-2.5">Venta</th><th className="px-3 py-2.5">Caja</th><th className="px-3 py-2.5">Mesa</th>
-                <th className="px-3 py-2.5">Medio</th><th className="px-3 py-2.5">Cuenta/Entidad</th><th className="px-3 py-2.5">Referencia</th>
+                <th className="px-3 py-2.5">Medio</th><th className="px-3 py-2.5">Cuenta / Titular</th><th className="px-3 py-2.5">Referencia</th>
                 <th className="px-3 py-2.5 text-right">Monto</th><th className="px-3 py-2.5">Estado</th><th className="px-3 py-2.5 text-center">Acciones</th>
               </tr></thead>
               <tbody>
@@ -113,7 +113,10 @@ export default function ConciliacionPage() {
                     <td className="px-3 py-2.5 tabular-nums">{r.caja_numero ?? "—"}</td>
                     <td className="px-3 py-2.5 tabular-nums">{r.mesa_numero ?? "—"}</td>
                     <td className="px-3 py-2.5">{r.medio_pago === "transferencia" ? "Transfer." : "Tarjeta"}{r.tipo_tarjeta ? ` (${r.tipo_tarjeta})` : ""}</td>
-                    <td className="px-3 py-2.5 text-xs">{r.cuenta_nombre ?? r.entidad ?? "—"}</td>
+                    <td className="px-3 py-2.5 text-xs">
+                      {r.cuenta_nombre ?? "—"}
+                      {r.entidad ? <span className="block text-[10px] text-slate-400">Titular: {r.entidad}</span> : null}
+                    </td>
                     <td className="px-3 py-2.5 text-xs">{r.referencia ?? "—"}</td>
                     <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{formatGs(r.monto)}</td>
                     <td className="px-3 py-2.5"><span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${BADGE[r.estado]}`}>{r.estado}</span>

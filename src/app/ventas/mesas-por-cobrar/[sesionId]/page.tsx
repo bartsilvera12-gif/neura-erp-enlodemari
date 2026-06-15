@@ -332,18 +332,22 @@ export default function FacturarMesaPage({ params }: { params: Promise<{ sesionI
                 </div>
               )}
 
-              {/* Transferencia → solo la cuenta destino (sin re-preguntar el banco). */}
+              {/* Transferencia → cuenta destino + titular + N° de comprobante. */}
               {metodo === "transferencia" && (
-                cuentas.length > 0 ? (
-                  <select value={pago.cuenta_bancaria_id ?? ""} onChange={(e) => setPago((p) => ({ ...p, cuenta_bancaria_id: e.target.value || null }))} className={inputClass}>
-                    <option value="">Cuenta destino…</option>
-                    {cuentas.map((c) => <option key={c.id} value={c.id}>{c.nombre}{c.banco ? ` (${c.banco})` : ""}</option>)}
-                  </select>
-                ) : (
-                  <p className="text-[11px] text-amber-600">No hay cuentas configuradas; se registra sin cuenta.</p>
-                )
+                <div className="space-y-2">
+                  {cuentas.length > 0 ? (
+                    <select value={pago.cuenta_bancaria_id ?? ""} onChange={(e) => setPago((p) => ({ ...p, cuenta_bancaria_id: e.target.value || null }))} className={inputClass}>
+                      <option value="">Cuenta destino…</option>
+                      {cuentas.map((c) => <option key={c.id} value={c.id}>{c.nombre}{c.banco ? ` (${c.banco})` : ""}</option>)}
+                    </select>
+                  ) : (
+                    <p className="text-[11px] text-amber-600">No hay cuentas configuradas; se registra sin cuenta.</p>
+                  )}
+                  <input value={pago.entidad ?? ""} onChange={(e) => setPago((p) => ({ ...p, entidad: e.target.value }))} placeholder="Titular de la transferencia" className={inputClass} />
+                  <input value={pago.referencia ?? ""} onChange={(e) => setPago((p) => ({ ...p, referencia: e.target.value }))} placeholder="N° de comprobante" className={inputClass} />
+                </div>
               )}
-              {/* Tarjeta → cuenta/POS + débito/crédito. Nada más. */}
+              {/* Tarjeta → cuenta/banco + N° de operación. */}
               {metodo === "tarjeta" && (
                 <div className="space-y-2">
                   {cuentas.length > 0 && (
@@ -352,14 +356,7 @@ export default function FacturarMesaPage({ params }: { params: Promise<{ sesionI
                       {cuentas.map((c) => <option key={c.id} value={c.id}>{c.nombre}{c.tipo ? ` (${c.tipo})` : ""}</option>)}
                     </select>
                   )}
-                  <div className="grid grid-cols-2 gap-1">
-                    {["debito", "credito"].map((t) => (
-                      <button key={t} type="button" onClick={() => setPago((p) => ({ ...p, tipo_tarjeta: t }))}
-                        className={`rounded-md border py-2 text-xs font-medium ${pago.tipo_tarjeta === t ? "border-[#0EA5E9] bg-[#0EA5E9]/10 text-[#0EA5E9]" : "border-slate-200 bg-white text-slate-600"}`}>
-                        {t === "debito" ? "Débito" : "Crédito"}
-                      </button>
-                    ))}
-                  </div>
+                  <input value={pago.referencia ?? ""} onChange={(e) => setPago((p) => ({ ...p, referencia: e.target.value }))} placeholder="N° de operación" className={inputClass} />
                 </div>
               )}
               {(metodo === "tarjeta" || metodo === "transferencia") && (

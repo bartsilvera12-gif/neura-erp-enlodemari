@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createServiceRoleClientWithDbSchema } from "@/lib/supabase/empresa-data-schema";
 import { calcularLineaVenta } from "@/lib/ventas/iva";
 import { getCajaAbiertaPg } from "@/lib/caja/server/caja-pg";
@@ -6,7 +7,8 @@ import {
   type CreateVentaItemInput,
 } from "@/lib/ventas/server/create-venta-pg";
 import type {
-  Comanda,
+  ComandaEnvioInfo,
+  ComandaEnvioResult,
   Mesa,
   MesaConResumen,
   MesaDetalle,
@@ -384,16 +386,93 @@ export async function enviarACajaPg(schema: string, empresaId: string, mesaId: s
   return mapSesion(upd.data as Record<string, unknown>);
 }
 
+/** Sector de producción de un set de productos (productos.sector_produccion). */
+async function sectoresDeProductos(
+  sb: Sb, empresaId: string, ids: string[]
+): Promise<Map<string, "pizzeria" | "plancha" | null>> {
+  const out = new Map<string, "pizzeria" | "plancha" | null>();
+  const uniq = [...new Set(ids.filter(Boolean))];
+  if (!uniq.length) return out;
+  const q = await sb.from("productos").select("id, sector_produccion").eq("empresa_id", empresaId).in("id", uniq);
+  for (const r of (q.data ?? []) as Array<{ id: string; sector_produccion: string | null }>) {
+    const s = r.sector_produccion;
+    out.set(r.id, s === "pizzeria" || s === "plancha" ? s : null);
+  }
+  return out;
+}
+
 /**
- * Envía a COCINA los ítems pendientes de la mesa como una nueva comanda.
- * La mesa sigue ocupada/abierta. NO crea venta, NO toca caja ni stock.
+ * Envía a PRODUCCIÓN los ítems pendientes de una sesión, generando comandas por
+ * sector dentro de un mismo batch:
+ *  · pizzería → copia completa del batch (todos los ítems del envío).
+ *  · plancha  → solo los ítems de plancha.
+ *  · bebidas / 'ninguno' → no generan comanda.
+ * Marca TODOS los pendientes como enviados (con produccion_batch_id) para no
+ * reimprimir producción al facturar. Idempotente respecto de ítems ya enviados.
+ */
+async function enviarProduccionDeSesion(
+  sb: Sb, empresaId: string, sesionId: string, usuarioId: string | null
+): Promise<ComandaEnvioResult> {
+  const pQ = await sb
+    .from("mesa_sesion_items").select("id, producto_id")
+    .eq("empresa_id", empresaId).eq("sesion_id", sesionId).eq("estado", "pendiente");
+  if (pQ.error) throw new Error(pQ.error.message);
+  const pendientes = (pQ.data ?? []) as Array<{ id: string; producto_id: string }>;
+  if (pendientes.length === 0) return { comandas: [], sin_produccion: false, total_pendientes: 0 };
+
+  const sectores = await sectoresDeProductos(sb, empresaId, pendientes.map((p) => p.producto_id));
+  const hayPizzeria = pendientes.some((p) => sectores.get(p.producto_id) === "pizzeria");
+  const hayPlancha = pendientes.some((p) => sectores.get(p.producto_id) === "plancha");
+
+  const batchId = randomUUID();
+  const nowIso = new Date().toISOString();
+  const creadas: ComandaEnvioInfo[] = [];
+
+  if (hayPizzeria || hayPlancha) {
+    // Número secuencial por sesión (una por sector dentro del batch).
+    const maxQ = await sb.from("comandas").select("numero")
+      .eq("empresa_id", empresaId).eq("sesion_id", sesionId)
+      .order("numero", { ascending: false }).limit(1);
+    if (maxQ.error) throw new Error(maxQ.error.message);
+    let numero = num((maxQ.data?.[0] as { numero?: number } | undefined)?.numero);
+
+    const planchaCount = pendientes.filter((p) => sectores.get(p.producto_id) === "plancha").length;
+    const sectoresACrear: Array<{ sector: "pizzeria" | "plancha"; count: number }> = [];
+    if (hayPizzeria) sectoresACrear.push({ sector: "pizzeria", count: pendientes.length }); // copia completa
+    if (hayPlancha) sectoresACrear.push({ sector: "plancha", count: planchaCount });
+
+    for (const s of sectoresACrear) {
+      numero += 1;
+      const ins = await sb.from("comandas")
+        .insert({ empresa_id: empresaId, sesion_id: sesionId, numero, creado_por: usuarioId, sector: s.sector, batch_id: batchId })
+        .select("id, numero").single();
+      if (ins.error) throw new Error(ins.error.message);
+      const row = ins.data as { id: string; numero: number };
+      creadas.push({ id: row.id, numero: row.numero, sector: s.sector, items_count: s.count });
+    }
+  }
+
+  // Comanda "primaria" para compatibilidad con comanda_id (pizzería si existe).
+  const primaria = creadas.find((c) => c.sector === "pizzeria") ?? creadas[0] ?? null;
+  const upd = await sb.from("mesa_sesion_items")
+    .update({ estado: "enviado", comanda_id: primaria?.id ?? null, enviado_at: nowIso, produccion_batch_id: batchId })
+    .eq("empresa_id", empresaId).eq("sesion_id", sesionId).eq("estado", "pendiente");
+  if (upd.error) throw new Error(upd.error.message);
+
+  return { comandas: creadas, sin_produccion: creadas.length === 0, total_pendientes: pendientes.length };
+}
+
+/**
+ * Envía a COCINA los ítems pendientes de la mesa. La mesa sigue ocupada/abierta.
+ * NO crea venta, NO toca caja ni stock. Genera comandas por sector (ver
+ * enviarProduccionDeSesion).
  */
 export async function enviarComandaPg(
   schema: string,
   empresaId: string,
   mesaId: string,
   usuarioId: string | null
-): Promise<Comanda> {
+): Promise<ComandaEnvioResult> {
   const sb = createServiceRoleClientWithDbSchema(schema);
   const sQ = await sb
     .from("mesa_sesiones").select("id, estado")
@@ -402,44 +481,9 @@ export async function enviarComandaPg(
   if (!sQ.data) throw new Error("La mesa no tiene una cuenta abierta.");
   const sesionId = (sQ.data as { id: string }).id;
 
-  // Ítems pendientes (aún no enviados a cocina).
-  const pQ = await sb
-    .from("mesa_sesion_items").select("id")
-    .eq("empresa_id", empresaId).eq("sesion_id", sesionId).eq("estado", "pendiente");
-  if (pQ.error) throw new Error(pQ.error.message);
-  const pendientes = (pQ.data ?? []) as Array<{ id: string }>;
-  if (pendientes.length === 0) throw new Error("No hay productos nuevos para enviar a comanda.");
-
-  // Número de comanda secuencial por sesión.
-  const maxQ = await sb
-    .from("comandas").select("numero")
-    .eq("empresa_id", empresaId).eq("sesion_id", sesionId)
-    .order("numero", { ascending: false }).limit(1);
-  if (maxQ.error) throw new Error(maxQ.error.message);
-  const numero = num((maxQ.data?.[0] as { numero?: number } | undefined)?.numero) + 1;
-
-  const ins = await sb
-    .from("comandas")
-    .insert({ empresa_id: empresaId, sesion_id: sesionId, numero, creado_por: usuarioId })
-    .select("id, sesion_id, numero, created_at")
-    .single();
-  if (ins.error) throw new Error(ins.error.message);
-  const comanda = ins.data as { id: string; sesion_id: string; numero: number; created_at: string };
-
-  // Marcar los pendientes como enviados, asociados a esta comanda.
-  const upd = await sb
-    .from("mesa_sesion_items")
-    .update({ estado: "enviado", comanda_id: comanda.id, enviado_at: new Date().toISOString() })
-    .eq("empresa_id", empresaId).eq("sesion_id", sesionId).eq("estado", "pendiente");
-  if (upd.error) throw new Error(upd.error.message);
-
-  return {
-    id: comanda.id,
-    sesion_id: comanda.sesion_id,
-    numero: comanda.numero,
-    created_at: comanda.created_at,
-    items_count: pendientes.length,
-  };
+  const result = await enviarProduccionDeSesion(sb, empresaId, sesionId, usuarioId);
+  if (result.total_pendientes === 0) throw new Error("No hay productos nuevos para enviar a comanda.");
+  return result;
 }
 
 /** Cancela la cuenta viva: sesión → cancelada, mesa → libre. */
@@ -522,6 +566,15 @@ export async function facturarSesionPg(params: {
   };
 
   try {
+    // Producción de ítems agregados en caja y aún NO enviados (casos 7/8): genera
+    // las comandas por sector que falten. No reimprime los ya enviados (dedup).
+    // Best-effort: una falla acá no debe bloquear la venta.
+    try {
+      await enviarProduccionDeSesion(sb, params.empresaId, ses.id, params.usuarioId);
+    } catch (e) {
+      console.error("[facturarSesionPg] enviarProduccion:", e instanceof Error ? e.message : e);
+    }
+
     // Ítems activos de la sesión.
     const iQ = await sb
       .from("mesa_sesion_items")

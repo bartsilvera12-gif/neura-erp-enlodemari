@@ -5,6 +5,7 @@ import { Fragment, useCallback, useEffect, useState } from "react";
 import EdgeScrollArea from "@/components/ui/EdgeScrollArea";
 import { comandaPrintUrl, getComandasHistorial, reimprimirComanda } from "@/lib/comandas/storage";
 import type { ComandaCard, EstadoComanda } from "@/lib/comandas/types";
+import { SectorBadge } from "@/components/comandas/SectorBadge";
 
 function formatFecha(iso: string | null) {
   if (!iso) return "—";
@@ -98,7 +99,7 @@ export default function ComandasHistorialPage() {
                   return (
                     <Fragment key={c.id}>
                       <tr className="border-b border-slate-100 hover:bg-slate-50">
-                        <td className="px-3 py-2.5 font-semibold text-slate-800">N°{c.numero}</td>
+                        <td className="px-3 py-2.5 font-semibold text-slate-800">N°{c.numero}<div><SectorBadge sector={c.sector} /></div></td>
                         <td className="px-3 py-2.5 tabular-nums">{c.mesa_numero ?? "—"}</td>
                         <td className="px-3 py-2.5">{c.mozo_nombre ?? "—"}</td>
                         <td className="px-3 py-2.5 text-xs text-slate-500">{formatFecha(c.created_at)}</td>

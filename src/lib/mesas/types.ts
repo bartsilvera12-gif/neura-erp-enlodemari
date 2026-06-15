@@ -61,6 +61,22 @@ export interface Comanda {
   items_count: number;
 }
 
+/** Una comanda de producción creada al enviar (pizzería o plancha). */
+export interface ComandaEnvioInfo {
+  id: string;
+  numero: number;
+  sector: "pizzeria" | "plancha";
+  items_count: number;
+}
+
+/** Resultado de "Enviar comanda": comandas por sector creadas en un batch. */
+export interface ComandaEnvioResult {
+  comandas: ComandaEnvioInfo[];
+  /** true si había pendientes pero ninguno requiere producción (solo bebidas). */
+  sin_produccion: boolean;
+  total_pendientes: number;
+}
+
 /** Mesa + resumen de su sesión viva (para el grid y la lista por-cobrar). */
 export interface MesaConResumen {
   mesa: Mesa;

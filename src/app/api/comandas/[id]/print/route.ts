@@ -9,6 +9,9 @@ const NEGOCIO = "EN LO DE MARI";
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
+function formatGs(v: number): string {
+  return `Gs. ${Math.round(v).toLocaleString("es-PY")}`;
+}
 function formatFecha(iso: string): string {
   try {
     const d = new Date(iso);
@@ -36,18 +39,40 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ id: str
 
   const widthMm = new URL(request.url).searchParams.get("w") === "58" ? 58 : 80;
 
-  // Solo ítems de esta comanda, sin cancelados (no se mezclan otras comandas ni pendientes).
-  const itemsHtml = c.items
-    .filter((it) => !it.cancelado)
-    .map((it) => `
-      <tr><td class="qty"><strong>${it.cantidad}×</strong></td><td class="name"><strong>${escapeHtml(it.producto_nombre)}</strong></td></tr>
-      ${it.observacion ? `<tr class="sub"><td></td><td colspan="2">&gt;&gt; ${escapeHtml(it.observacion)}</td></tr>` : ""}`)
+  // Pizzería = COPIA COMPLETA con precios (igualita al ticket cliente, solo cambia
+  // el encabezado). Plancha y legacy = comanda de producción sin precios.
+  const conPrecios = c.sector === "pizzeria";
+  const banner =
+    c.sector === "pizzeria" ? "COPIA PIZZERÍA"
+    : c.sector === "plancha" ? "COMANDA PLANCHA"
+    : `COMANDA #${c.numero}`;
+  const metaSector =
+    c.sector === "pizzeria" ? "PIZZERÍA" : c.sector === "plancha" ? "PLANCHA" : "COCINA";
+
+  const vigentes = c.items.filter((it) => !it.cancelado);
+  const itemsHtml = vigentes
+    .map((it) => {
+      const obs = it.observacion ? `<tr class="sub"><td></td><td colspan="2">&gt;&gt; ${escapeHtml(it.observacion)}</td></tr>` : "";
+      if (conPrecios) {
+        return `
+          <tr><td class="qty"><strong>${it.cantidad}×</strong></td><td class="name">${escapeHtml(it.producto_nombre)}</td><td class="amt">${formatGs(it.total)}</td></tr>
+          <tr class="sub"><td></td><td colspan="2">${it.cantidad} × ${formatGs(it.precio_unitario)}</td></tr>${obs}`;
+      }
+      return `
+        <tr><td class="qty"><strong>${it.cantidad}×</strong></td><td class="name" colspan="2"><strong>${escapeHtml(it.producto_nombre)}</strong></td></tr>${obs}`;
+    })
     .join("");
 
+  const totalGs = vigentes.reduce((s, it) => s + it.total, 0);
+  const totalHtml = conPrecios
+    ? `<hr><table class="totales"><tbody><tr class="total-row"><td class="lbl">TOTAL</td><td class="val">${formatGs(totalGs)}</td></tr></tbody></table>`
+    : "";
+  const footer = conPrecios ? "Copia pizzería — uso interno" : "Comanda interna — no es comprobante";
+
   const section = `<section class="paper last">
-    <div class="sector-banner">COMANDA #${c.numero}</div>
+    <div class="sector-banner">${banner}</div>
     <h1>${NEGOCIO}</h1>
-    <div class="meta">COCINA · ${formatFecha(c.created_at)}</div>
+    <div class="meta">${metaSector} · ${formatFecha(c.created_at)}</div>
     <hr>
     <div class="pedido">
       <div><strong>Mesa ${c.mesa_numero ?? "—"}</strong></div>
@@ -55,12 +80,14 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ id: str
     </div>
     <hr>
     <table><tbody>${itemsHtml || '<tr><td colspan="2">(sin ítems)</td></tr>'}</tbody></table>
+    ${totalHtml}
     <hr>
-    <div class="footer">Comanda interna — no es comprobante</div>
+    <div class="footer">${footer}</div>
   </section>`;
 
+  const title = c.sector === "pizzeria" ? "Copia pizzería" : c.sector === "plancha" ? "Comanda plancha" : `Comanda N°${c.numero}`;
   const html = wrapTicketDocument(section, {
-    widthMm, title: `Comanda N°${c.numero} — ${NEGOCIO}`, autoPrint: true,
+    widthMm, title: `${title} — ${NEGOCIO}`, autoPrint: true,
   });
   return new NextResponse(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }

@@ -11,10 +11,14 @@ export type EstadoComanda = "generada" | "impresa" | "cancelada";
 
 export const ESTADOS_COMANDA: EstadoComanda[] = ["generada", "impresa", "cancelada"];
 
+/** Sector de producción de una comanda: pizzería (copia completa) o plancha (filtrada). */
+export type SectorComanda = "pizzeria" | "plancha";
+
 export interface ComandaItem {
   id: string;
   producto_nombre: string;
   cantidad: number;
+  precio_unitario: number;
   observacion: string | null;
   total: number;
   /** estado del ítem en la cuenta (cancelado en Mesas), no de la comanda. */
@@ -33,6 +37,8 @@ export interface ComandaCard {
   items: ComandaItem[];
   printed_at: string | null;
   print_count: number;
+  /** Sector de producción. null = comanda legacy (anterior al split por sector). */
+  sector: SectorComanda | null;
 }
 
 /** Filtros del historial de comandas (impresas/canceladas). */

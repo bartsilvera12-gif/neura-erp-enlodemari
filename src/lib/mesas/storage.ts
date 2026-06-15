@@ -1,5 +1,5 @@
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
-import type { Comanda, MesaConResumen, MesaDetalle, MesaSesionItem } from "./types";
+import type { ComandaEnvioResult, MesaConResumen, MesaDetalle, MesaSesionItem } from "./types";
 
 type Ok<T> = { success: true } & T;
 type Err = { success: false; error: string };
@@ -38,9 +38,9 @@ export function actualizarItemMesa(itemId: string, payload: { cantidad?: number;
   return call<{ item: MesaSesionItem }>(`/api/mesas/items/${encodeURIComponent(itemId)}`, "PATCH", payload);
 }
 
-/** Envía los ítems pendientes a cocina (comanda). La mesa sigue ocupada. */
+/** Envía los ítems pendientes a producción (comandas por sector). La mesa sigue ocupada. */
 export function enviarComandaMesa(mesaId: string) {
-  return call<{ comanda: Comanda }>(`/api/mesas/${encodeURIComponent(mesaId)}/comanda`, "POST", {});
+  return call<ComandaEnvioResult>(`/api/mesas/${encodeURIComponent(mesaId)}/comanda`, "POST", {});
 }
 
 /** Pedir cuenta / enviar a caja para cobrar (la mesa pasa a por_cobrar). */

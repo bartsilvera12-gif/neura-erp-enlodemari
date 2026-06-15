@@ -6,6 +6,7 @@ import {
   cancelarComanda, comandaPrintUrl, getComandas, getComandasHistorial, imprimirComanda,
 } from "@/lib/comandas/storage";
 import type { ComandaCard } from "@/lib/comandas/types";
+import { SectorBadge } from "@/components/comandas/SectorBadge";
 
 function formatHora(iso: string | null) {
   if (!iso) return "—";
@@ -90,6 +91,7 @@ export default function ComandasPage() {
           <span className="text-base font-bold text-slate-800">Comanda N°{c.numero}</span>
           <span className="text-xs text-slate-400">{formatHora(c.created_at)}</span>
         </div>
+        <SectorBadge sector={c.sector} />
         <p className="text-sm text-slate-600">Mesa <strong>{c.mesa_numero ?? "—"}</strong> · Mozo: {c.mozo_nombre ?? "—"}</p>
         <p className="text-xs text-slate-500">{vigentes} ítem(s)</p>
 

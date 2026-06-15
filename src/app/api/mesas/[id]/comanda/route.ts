@@ -15,8 +15,8 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
     const auth = gate.auth;
     const { id } = await ctx.params;
     const schema = await fetchDataSchemaForEmpresaId(auth.empresa_id);
-    const comanda = await enviarComandaPg(schema, auth.empresa_id, id, auth.usuarioCatalogId ?? null);
-    return NextResponse.json(successResponse({ comanda }));
+    const envio = await enviarComandaPg(schema, auth.empresa_id, id, auth.usuarioCatalogId ?? null);
+    return NextResponse.json(successResponse(envio));
   } catch (err) {
     const msg = err instanceof Error ? err.message : "No se pudo enviar la comanda.";
     const status = msg.includes("No hay productos nuevos") || msg.includes("no tiene") ? 409 : 500;

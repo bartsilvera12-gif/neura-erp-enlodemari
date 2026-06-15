@@ -8,7 +8,7 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-const COMANDA_COLS = "id, numero, estado, created_at, sesion_id, creado_por, printed_at, print_count";
+const COMANDA_COLS = "id, numero, estado, created_at, sesion_id, creado_por, printed_at, print_count, sector, batch_id";
 
 interface ComandaRow {
   id: string;
@@ -19,6 +19,23 @@ interface ComandaRow {
   creado_por: string | null;
   printed_at: string | null;
   print_count: number | string | null;
+  sector: string | null;
+  batch_id: string | null;
+}
+
+/** Resuelve el sector de producción de un set de productos (productos.sector_produccion). */
+async function resolveSectoresProducto(
+  sb: Sb, empresaId: string, productoIds: string[]
+): Promise<Map<string, "pizzeria" | "plancha" | null>> {
+  const out = new Map<string, "pizzeria" | "plancha" | null>();
+  const uniq = [...new Set(productoIds.filter(Boolean))];
+  if (!uniq.length) return out;
+  const q = await sb.from("productos").select("id, sector_produccion").eq("empresa_id", empresaId).in("id", uniq);
+  for (const r of (q.data ?? []) as Array<{ id: string; sector_produccion: string | null }>) {
+    const s = r.sector_produccion;
+    out.set(r.id, s === "pizzeria" || s === "plancha" ? s : null);
+  }
+  return out;
 }
 
 /** Ensambla ComandaCard[]: resuelve mesa (vía sesión), mozo (creado_por) e ítems. */
@@ -49,30 +66,66 @@ async function armarCards(sb: Sb, empresaId: string, comandas: ComandaRow[]): Pr
     } catch { /* nombres opcionales */ }
   }
 
-  const iQ = await sb
-    .from("mesa_sesion_items")
-    .select("id, comanda_id, producto_nombre, cantidad, observacion, total, estado")
-    .eq("empresa_id", empresaId)
-    .in("comanda_id", comandaIds)
-    .order("created_at", { ascending: true });
-  const itemsByComanda = new Map<string, ComandaItem[]>();
-  for (const it of (iQ.data ?? []) as Array<Record<string, unknown>>) {
-    const cid = String(it.comanda_id);
-    const list = itemsByComanda.get(cid) ?? [];
-    list.push({
+  // Los ítems de una comanda nueva se agrupan por batch (produccion_batch_id);
+  // las comandas legacy (sin batch) siguen agrupadas por comanda_id.
+  const batchIds = [...new Set(comandas.map((c) => c.batch_id).filter(Boolean) as string[])];
+  const legacyIds = comandas.filter((c) => !c.batch_id).map((c) => c.id);
+
+  type ItemRow = Record<string, unknown>;
+  const ITEM_SEL = "id, comanda_id, producto_id, producto_nombre, cantidad, precio_unitario, observacion, total, estado, produccion_batch_id";
+  const itemsByBatch = new Map<string, ItemRow[]>();
+  const itemsByLegacyComanda = new Map<string, ItemRow[]>();
+  const allProductoIds: string[] = [];
+
+  if (batchIds.length) {
+    const q = await sb.from("mesa_sesion_items").select(ITEM_SEL)
+      .eq("empresa_id", empresaId).in("produccion_batch_id", batchIds)
+      .order("created_at", { ascending: true });
+    for (const it of (q.data ?? []) as ItemRow[]) {
+      const b = String(it.produccion_batch_id);
+      const list = itemsByBatch.get(b) ?? [];
+      list.push(it); itemsByBatch.set(b, list);
+      if (it.producto_id) allProductoIds.push(String(it.producto_id));
+    }
+  }
+  if (legacyIds.length) {
+    const q = await sb.from("mesa_sesion_items").select(ITEM_SEL)
+      .eq("empresa_id", empresaId).in("comanda_id", legacyIds)
+      .order("created_at", { ascending: true });
+    for (const it of (q.data ?? []) as ItemRow[]) {
+      const cid = String(it.comanda_id);
+      const list = itemsByLegacyComanda.get(cid) ?? [];
+      list.push(it); itemsByLegacyComanda.set(cid, list);
+    }
+  }
+
+  const sectorByProd = await resolveSectoresProducto(sb, empresaId, allProductoIds);
+
+  function toItem(it: ItemRow): ComandaItem {
+    return {
       id: String(it.id),
       producto_nombre: (it.producto_nombre as string) ?? "",
       cantidad: num(it.cantidad),
+      precio_unitario: num(it.precio_unitario),
       observacion: (it.observacion as string) ?? null,
       total: num(it.total),
       cancelado: it.estado === "cancelado",
-    });
-    itemsByComanda.set(cid, list);
+    };
   }
 
   return comandas.map((c) => {
     const ses = sesById.get(c.sesion_id);
-    const items = itemsByComanda.get(c.id) ?? [];
+    const sector = c.sector === "pizzeria" || c.sector === "plancha" ? c.sector : null;
+
+    let rows: ItemRow[];
+    if (c.batch_id) {
+      rows = itemsByBatch.get(c.batch_id) ?? [];
+      // Plancha = solo sus ítems; pizzería = copia completa del batch.
+      if (sector === "plancha") rows = rows.filter((it) => sectorByProd.get(String(it.producto_id)) === "plancha");
+    } else {
+      rows = itemsByLegacyComanda.get(c.id) ?? [];
+    }
+    const items = rows.map(toItem);
     const total = items.filter((i) => !i.cancelado).reduce((s, i) => s + i.total, 0);
     return {
       id: c.id,
@@ -85,6 +138,7 @@ async function armarCards(sb: Sb, empresaId: string, comandas: ComandaRow[]): Pr
       items,
       printed_at: c.printed_at,
       print_count: num(c.print_count),
+      sector,
     };
   });
 }

@@ -106,8 +106,13 @@ export default function MesaDetallePage({ params }: { params: Promise<{ id: stri
     setBusy(false);
     if (!r.success) { setError(r.error); return; }
     setItems((prev) => prev.map((i) => (i.estado === "pendiente" ? { ...i, estado: "enviado" } : i)));
-    setOkMsg(`Comanda ${r.comanda.numero} enviada a cocina (${r.comanda.items_count} ítem/s).`);
-    setTimeout(() => setOkMsg(null), 2500);
+    if (r.sin_produccion || r.comandas.length === 0) {
+      setOkMsg("No hay productos que requieran producción.");
+    } else {
+      const partes = r.comandas.map((c) => `${c.sector === "pizzeria" ? "Pizzería" : "Plancha"} N°${c.numero}`);
+      setOkMsg(`Enviado a producción: ${partes.join(" · ")}.`);
+    }
+    setTimeout(() => setOkMsg(null), 3000);
   }
 
   async function onPedirCuenta() {

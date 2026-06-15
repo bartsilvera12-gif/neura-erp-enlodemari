@@ -34,3 +34,14 @@ export interface ComandaCard {
   printed_at: string | null;
   print_count: number;
 }
+
+/** Filtros del historial de comandas (impresas/canceladas). */
+export interface ComandaHistorialFiltros {
+  desde?: string | null;   // YYYY-MM-DD (sobre created_at)
+  hasta?: string | null;   // YYYY-MM-DD (sobre created_at)
+  /** `impresa` | `cancelada`; null/ausente = ambas. */
+  estado?: Extract<EstadoComanda, "impresa" | "cancelada"> | null;
+  mesa?: number | null;    // número de mesa exacto
+  mozo?: string | null;    // coincidencia parcial sobre el nombre del mozo
+  numero?: number | null;  // número de comanda exacto
+}

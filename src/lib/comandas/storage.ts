@@ -1,10 +1,30 @@
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
-import type { ComandaCard, EstadoComanda } from "./types";
+import type { ComandaCard, ComandaHistorialFiltros, EstadoComanda } from "./types";
 
 export async function getComandas(estado?: EstadoComanda | null): Promise<ComandaCard[]> {
   try {
     const qs = estado ? `?estado=${encodeURIComponent(estado)}` : "";
     const res = await fetchWithSupabaseSession(`/api/comandas${qs}`, { cache: "no-store" });
+    const json = (await res.json()) as { success?: boolean; data?: { comandas: ComandaCard[] }; error?: string };
+    if (!res.ok || !json.success) return [];
+    return json.data?.comandas ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Historial de comandas impresas/canceladas con filtros. */
+export async function getComandasHistorial(f?: ComandaHistorialFiltros): Promise<ComandaCard[]> {
+  try {
+    const qs = new URLSearchParams();
+    if (f?.desde) qs.set("desde", f.desde);
+    if (f?.hasta) qs.set("hasta", f.hasta);
+    if (f?.estado) qs.set("estado", f.estado);
+    if (f?.mesa != null) qs.set("mesa", String(f.mesa));
+    if (f?.mozo) qs.set("mozo", f.mozo);
+    if (f?.numero != null) qs.set("numero", String(f.numero));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    const res = await fetchWithSupabaseSession(`/api/comandas/historial${suffix}`, { cache: "no-store" });
     const json = (await res.json()) as { success?: boolean; data?: { comandas: ComandaCard[] }; error?: string };
     if (!res.ok || !json.success) return [];
     return json.data?.comandas ?? [];

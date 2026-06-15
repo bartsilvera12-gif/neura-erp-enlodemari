@@ -1,5 +1,5 @@
 import { createServiceRoleClientWithDbSchema } from "@/lib/supabase/empresa-data-schema";
-import type { ComandaCard, ComandaItem, EstadoComanda } from "@/lib/comandas/types";
+import type { ComandaCard, ComandaHistorialFiltros, ComandaItem, EstadoComanda } from "@/lib/comandas/types";
 
 type Sb = ReturnType<typeof createServiceRoleClientWithDbSchema>;
 
@@ -112,6 +112,42 @@ export async function listarComandasPg(
   const { data, error } = await q;
   if (error) throw new Error(error.message);
   return armarCards(sb, empresaId, (data ?? []) as unknown as ComandaRow[]);
+}
+
+/**
+ * Historial de comandas: SOLO impresas y/o canceladas (nunca `generada`, que es
+ * la cola operativa). Filtros: rango de fechas (created_at), estado, mesa, mozo y
+ * número de comanda. Las reimpresas son `impresa` con print_count > 1.
+ */
+export async function listarComandasHistorialPg(
+  schema: string,
+  empresaId: string,
+  f?: ComandaHistorialFiltros
+): Promise<ComandaCard[]> {
+  const sb = createServiceRoleClientWithDbSchema(schema);
+  let q = sb
+    .from("comandas")
+    .select(COMANDA_COLS)
+    .eq("empresa_id", empresaId)
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (f?.estado) q = q.eq("estado", f.estado);
+  else q = q.in("estado", ["impresa", "cancelada"]);
+  if (f?.desde) q = q.gte("created_at", `${f.desde}T00:00:00`);
+  if (f?.hasta) q = q.lte("created_at", `${f.hasta}T23:59:59.999`);
+
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  let cards = await armarCards(sb, empresaId, (data ?? []) as unknown as ComandaRow[]);
+
+  // Filtros resueltos sobre datos ya ensamblados (mesa/mozo/numero).
+  if (f?.numero != null) cards = cards.filter((c) => c.numero === f.numero);
+  if (f?.mesa != null) cards = cards.filter((c) => c.mesa_numero === f.mesa);
+  if (f?.mozo) {
+    const needle = f.mozo.toLowerCase();
+    cards = cards.filter((c) => (c.mozo_nombre ?? "").toLowerCase().includes(needle));
+  }
+  return cards;
 }
 
 export async function getComandaDetallePg(

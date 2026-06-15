@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireModule } from "@/lib/middleware/require-module";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { agregarItemCajaPg } from "@/lib/mesas/server/mesas-pg";
+import { parseMitadFromBody } from "@/lib/mesas/mitad-parse";
 import { successResponse, errorResponse } from "@/lib/api/response";
 
 /** POST /api/ventas/mesas-por-cobrar/[sesionId]/items — caja agrega un producto a la cuenta. */
@@ -18,14 +19,12 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ sesion
     const cantidad = Number(o.cantidad);
     if (!Number.isFinite(cantidad) || cantidad <= 0) return NextResponse.json(errorResponse("Cantidad inválida."), { status: 400 });
     const observacion = o.observacion == null || o.observacion === "" ? null : String(o.observacion).slice(0, 2000);
-    const precioRaw = o.precio_unitario;
-    const precioUnitario = precioRaw == null || precioRaw === "" ? null
-      : (Number.isFinite(Number(precioRaw)) && Number(precioRaw) > 0 ? Number(precioRaw) : null);
+    const { precioUnitario, displayName, mitad } = parseMitadFromBody(o);
 
     const schema = await fetchDataSchemaForEmpresaId(gate.auth.empresa_id);
     const item = await agregarItemCajaPg({
       schema, empresaId: gate.auth.empresa_id, sesionId, productoId, cantidad, observacion,
-      cajeroId: gate.auth.usuarioCatalogId ?? null, precioUnitario,
+      cajeroId: gate.auth.usuarioCatalogId ?? null, precioUnitario, displayName, mitad,
     });
     return NextResponse.json(successResponse({ item }));
   } catch (err) {

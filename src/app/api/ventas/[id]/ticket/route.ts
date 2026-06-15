@@ -139,6 +139,9 @@ interface ItemRow {
   cantidad: number | string;
   precio_venta: number | string;
   total_linea: number | string;
+  es_mitad_mitad?: boolean;
+  mitad_1_nombre?: string | null;
+  mitad_2_nombre?: string | null;
 }
 
 type EnrichedItem = ItemRow & { sector: Sector };
@@ -185,17 +188,19 @@ function renderCopia(opts: {
       const cant = Number(it.cantidad);
       const punit = Number(it.precio_venta);
       const sub = Number(it.total_linea);
+      const mitad = it.es_mitad_mitad && it.mitad_1_nombre && it.mitad_2_nombre
+        ? `<tr class="sub"><td></td><td colspan="2">½ ${escapeHtml(it.mitad_1_nombre)} + ½ ${escapeHtml(it.mitad_2_nombre)}</td></tr>` : "";
       const main = showPrices
         ? `<tr>
              <td class="qty"><strong>${cant}×</strong></td>
              <td class="name">${escapeHtml(it.producto_nombre)}</td>
              <td class="amt">${formatGs(sub)}</td>
            </tr>
-           <tr class="sub"><td></td><td colspan="2">${cant} × ${formatGs(punit)}</td></tr>`
+           <tr class="sub"><td></td><td colspan="2">${cant} × ${formatGs(punit)}</td></tr>${mitad}`
         : `<tr>
              <td class="qty"><strong>${cant}×</strong></td>
              <td class="name" colspan="2"><strong>${escapeHtml(it.producto_nombre)}</strong></td>
-           </tr>`;
+           </tr>${mitad}`;
       return main;
     })
     .join("");
@@ -300,7 +305,7 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
   // Items
   const iQ = await ctx.supabase
     .from("ventas_items")
-    .select("producto_id, producto_nombre, sku, cantidad, precio_venta, total_linea")
+    .select("producto_id, producto_nombre, sku, cantidad, precio_venta, total_linea, es_mitad_mitad, mitad_1_nombre, mitad_2_nombre")
     .eq("venta_id", id)
     .eq("empresa_id", empresaId);
   if (iQ.error) return new NextResponse(`Error items: ${iQ.error.message}`, { status: 500 });

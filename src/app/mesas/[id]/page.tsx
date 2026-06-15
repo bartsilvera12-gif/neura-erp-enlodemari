@@ -3,6 +3,7 @@
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import MesaProductPicker from "@/components/mesas/MesaProductPicker";
+import MitadMitadPicker, { type MitadMitadResult } from "@/components/ventas/MitadMitadPicker";
 import {
   actualizarItemMesa, agregarItemMesa, cancelarCuentaMesa,
   enviarComandaMesa, enviarMesaACaja, getMesaDetalle,
@@ -31,6 +32,7 @@ export default function MesaDetallePage({ params }: { params: Promise<{ id: stri
   const [items, setItems] = useState<MesaSesionItem[]>([]);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [mitadOpen, setMitadOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
@@ -79,6 +81,35 @@ export default function MesaDetallePage({ params }: { params: Promise<{ id: stri
     setItems((prev) => prev.map((i) => (i.id === tmpId ? r.item : i))); // reconciliar
     markPending(tmpId, false);
     return true;
+  }
+
+  // Pizza mitad y mitad (optimista): aparece al instante con el precio del sabor más caro.
+  async function onAddMitad(r: MitadMitadResult) {
+    setMitadOpen(false);
+    setError(null);
+    const tmpId = `tmp-${++tmpCounter.current}`;
+    const optimistic: MesaSesionItem = {
+      id: tmpId, sesion_id: "", producto_id: r.producto_id, producto_nombre: r.display_name, sku: null,
+      cantidad: 1, precio_unitario: r.precio_unitario, total: r.precio_unitario,
+      observacion: null, estado: "pendiente", comanda_id: null, enviado_at: null,
+      es_mitad_mitad: true, mitad_1_nombre: r.mitad.nombre1, mitad_2_nombre: r.mitad.nombre2,
+    };
+    setItems((prev) => [...prev, optimistic]);
+    markPending(tmpId, true);
+    setMesaEstado((e) => (e === "libre" ? "ocupada" : e));
+
+    const res = await agregarItemMesa(id, {
+      producto_id: r.producto_id, cantidad: 1, observacion: null,
+      precio_unitario: r.precio_unitario, display_name: r.display_name, mitad: r.mitad,
+    });
+    if (!res.success) {
+      setItems((prev) => prev.filter((i) => i.id !== tmpId));
+      markPending(tmpId, false);
+      setError(res.error);
+      return;
+    }
+    setItems((prev) => prev.map((i) => (i.id === tmpId ? res.item : i)));
+    markPending(tmpId, false);
   }
 
   async function onChangeQty(item: MesaSesionItem, delta: number) {
@@ -187,6 +218,9 @@ export default function MesaDetallePage({ params }: { params: Promise<{ id: stri
                       </span>
                       {tmp && <span className="text-[10px] text-slate-400">guardando…</span>}
                     </div>
+                    {it.es_mitad_mitad && it.mitad_1_nombre && it.mitad_2_nombre && (
+                      <p className="text-xs text-amber-700">½ {it.mitad_1_nombre} + ½ {it.mitad_2_nombre}</p>
+                    )}
                     {it.observacion && <p className="text-xs text-amber-700">— {it.observacion}</p>}
                     <p className="text-xs text-slate-400">{formatGs(it.precio_unitario)} c/u</p>
                     {/* Editar cantidad solo si es pendiente (no enviado a cocina). */}
@@ -225,6 +259,10 @@ export default function MesaDetallePage({ params }: { params: Promise<{ id: stri
               className="rounded-xl bg-[#0EA5E9] px-5 py-4 text-base font-semibold text-white shadow-sm hover:bg-[#0284C7] active:scale-95">
               + Agregar productos
             </button>
+            <button type="button" onClick={() => setMitadOpen(true)}
+              className="rounded-xl border border-amber-300 bg-amber-50 px-5 py-4 text-base font-semibold text-amber-800 shadow-sm hover:bg-amber-100 active:scale-95">
+              🍕 Pizza mitad y mitad
+            </button>
             {hayPendientes && (
               <button type="button" onClick={onEnviarComanda} disabled={busy}
                 className="rounded-xl bg-indigo-600 px-5 py-4 text-base font-semibold text-white shadow-sm hover:bg-indigo-700 active:scale-95 disabled:opacity-50">
@@ -248,6 +286,7 @@ export default function MesaDetallePage({ params }: { params: Promise<{ id: stri
       )}
 
       <MesaProductPicker open={pickerOpen} onClose={() => setPickerOpen(false)} onAdd={onAdd} />
+      <MitadMitadPicker open={mitadOpen} onClose={() => setMitadOpen(false)} onConfirm={onAddMitad} />
     </div>
   );
 }

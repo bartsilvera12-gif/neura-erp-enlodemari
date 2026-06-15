@@ -4,6 +4,7 @@ import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ProductPickerModal, { type AgregarVentaPayload } from "@/components/inventario/ProductPickerModal";
+import MitadMitadPicker, { type MitadMitadResult } from "@/components/ventas/MitadMitadPicker";
 import MontoInput from "@/components/ui/MontoInput";
 import { calcularLineaVenta } from "@/lib/ventas/iva";
 import { actualizarItemCaja, agregarItemCaja, getSesionPorCobrar } from "@/lib/ventas/por-cobrar";
@@ -48,6 +49,7 @@ export default function FacturarMesaPage({ params }: { params: Promise<{ sesionI
   const [sinCaja, setSinCaja] = useState(false);
 
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [mitadOpen, setMitadOpen] = useState(false);
   const [cuentas, setCuentas] = useState<CuentaBancaria[]>([]);
 
   // Cobro
@@ -93,6 +95,17 @@ export default function FacturarMesaPage({ params }: { params: Promise<{ sesionI
       else { setError(null); reload(); }
     });
     return true;
+  }
+
+  function handleAgregarMitad(r: MitadMitadResult) {
+    agregarItemCaja(sesionId, {
+      producto_id: r.producto_id, cantidad: 1, observacion: null,
+      precio_unitario: r.precio_unitario, display_name: r.display_name, mitad: r.mitad,
+    }).then((res) => {
+      if (!res.success) setError(res.error);
+      else { setError(null); reload(); }
+    });
+    setMitadOpen(false);
   }
 
   async function changeQty(itemId: string, nueva: number) {
@@ -209,16 +222,25 @@ export default function FacturarMesaPage({ params }: { params: Promise<{ sesionI
       {/* ── SECCIÓN 1: Agregar producto ─────────────────────────────────────── */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4 sm:p-6">
         <SectionTitle>Agregar producto</SectionTitle>
-        <button
-          type="button"
-          onClick={() => setPickerOpen(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-[#0EA5E9] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0284C7] transition-colors shadow-sm"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-            <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
-          </svg>
-          Buscar producto
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-[#0EA5E9] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0284C7] transition-colors shadow-sm"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+              <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
+            </svg>
+            Buscar producto
+          </button>
+          <button
+            type="button"
+            onClick={() => setMitadOpen(true)}
+            className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800 hover:bg-amber-100"
+          >
+            🍕 Pizza mitad y mitad
+          </button>
+        </div>
         <p className="mt-2 text-xs text-slate-400">El mismo buscador del catálogo que usa Nueva venta (nombre, SKU, código, categoría).</p>
       </div>
 
@@ -248,6 +270,9 @@ export default function FacturarMesaPage({ params }: { params: Promise<{ sesionI
                   <tr key={it.id} className="border-b border-slate-200 last:border-0">
                     <td className="py-3 pr-3 font-medium text-gray-800">
                       {it.producto_nombre}
+                      {it.es_mitad_mitad && it.mitad_1_nombre && it.mitad_2_nombre && (
+                        <span className="block text-xs font-normal text-amber-700">½ {it.mitad_1_nombre} + ½ {it.mitad_2_nombre}</span>
+                      )}
                       {it.observacion ? <span className="block text-xs font-normal text-slate-400">{it.observacion}</span> : null}
                     </td>
                     <td className="hidden py-3 pr-3 font-mono text-xs text-gray-500 lg:table-cell">{it.sku}</td>
@@ -395,6 +420,8 @@ export default function FacturarMesaPage({ params }: { params: Promise<{ sesionI
         tipoCambio={1}
         ivaDefault="10%"
       />
+
+      <MitadMitadPicker open={mitadOpen} onClose={() => setMitadOpen(false)} onConfirm={handleAgregarMitad} />
     </div>
   );
 }

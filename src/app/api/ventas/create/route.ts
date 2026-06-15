@@ -35,6 +35,12 @@ function asItems(body: unknown): CreateVentaItemInput[] | null {
       subtotal: desglose.subtotal,
       monto_iva: desglose.monto_iva,
       total_linea: desglose.total_linea,
+      es_mitad_mitad: r.es_mitad_mitad === true,
+      mitad_1_producto_id: r.mitad_1_producto_id ? String(r.mitad_1_producto_id) : null,
+      mitad_2_producto_id: r.mitad_2_producto_id ? String(r.mitad_2_producto_id) : null,
+      mitad_1_nombre: r.mitad_1_nombre ? String(r.mitad_1_nombre) : null,
+      mitad_2_nombre: r.mitad_2_nombre ? String(r.mitad_2_nombre) : null,
+      item_display_name: r.item_display_name ? String(r.item_display_name) : null,
     });
   }
   if (out.some((i) => !i.producto_id || !(i.cantidad > 0))) return null;

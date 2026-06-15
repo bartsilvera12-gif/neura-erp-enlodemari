@@ -27,7 +27,7 @@ const MESA_COLS = "id, numero, nombre, estado, activo";
 const SESION_COLS =
   "id, mesa_id, estado, mozo_id, abierta_at, enviada_caja_at, cerrada_at, venta_id, observacion";
 const ITEM_COLS =
-  "id, sesion_id, producto_id, producto_nombre, sku, cantidad, precio_unitario, total, observacion, estado, comanda_id, enviado_at";
+  "id, sesion_id, producto_id, producto_nombre, sku, cantidad, precio_unitario, total, observacion, estado, comanda_id, enviado_at, es_mitad_mitad, mitad_1_nombre, mitad_2_nombre, item_display_name";
 
 /** Estados de ítem que cuentan en la cuenta (todo menos cancelado). */
 const ITEM_VIGENTES = ["pendiente", "enviado"];
@@ -68,6 +68,10 @@ function mapItem(r: Record<string, unknown>): MesaSesionItem {
     estado: r.estado as MesaSesionItem["estado"],
     comanda_id: (r.comanda_id as string) ?? null,
     enviado_at: (r.enviado_at as string) ?? null,
+    es_mitad_mitad: r.es_mitad_mitad === true,
+    mitad_1_nombre: (r.mitad_1_nombre as string) ?? null,
+    mitad_2_nombre: (r.mitad_2_nombre as string) ?? null,
+    item_display_name: (r.item_display_name as string) ?? null,
   };
 }
 
@@ -258,6 +262,25 @@ export async function abrirMesaPg(
   return ensureSesionAbierta(sb, empresaId, mesaId, mozoId);
 }
 
+/** Metadata de pizza mitad y mitad para inserción de un ítem. */
+export interface MitadMitadInput {
+  producto1Id: string | null;
+  producto2Id: string | null;
+  nombre1: string | null;
+  nombre2: string | null;
+}
+/** Columnas mitad-mitad para el insert de un mesa_sesion_item. */
+function mitadInsertCols(displayName: string | null, mitad: MitadMitadInput | null | undefined) {
+  return {
+    es_mitad_mitad: !!mitad,
+    mitad_1_producto_id: mitad?.producto1Id ?? null,
+    mitad_2_producto_id: mitad?.producto2Id ?? null,
+    mitad_1_nombre: mitad?.nombre1 ?? null,
+    mitad_2_nombre: mitad?.nombre2 ?? null,
+    item_display_name: displayName ?? null,
+  };
+}
+
 export async function agregarItemPg(params: {
   schema: string;
   empresaId: string;
@@ -266,6 +289,11 @@ export async function agregarItemPg(params: {
   cantidad: number;
   observacion: string | null;
   creadoPor: string | null;
+  /** Precio unitario override (pizza mitad y mitad = max de ambos sabores). */
+  precioUnitario?: number | null;
+  /** Nombre a mostrar (ej. "Pizza mitad y mitad"). */
+  displayName?: string | null;
+  mitad?: MitadMitadInput | null;
 }): Promise<MesaSesionItem> {
   const sb = createServiceRoleClientWithDbSchema(params.schema);
   const sesion = await ensureSesionAbierta(sb, params.empresaId, params.mesaId, params.creadoPor);
@@ -285,7 +313,8 @@ export async function agregarItemPg(params: {
 
   const cantidad = num(params.cantidad);
   if (cantidad <= 0) throw new Error("La cantidad debe ser mayor a 0.");
-  const precio = num(prod.precio_venta);
+  const precioOverride = params.precioUnitario != null ? num(params.precioUnitario) : 0;
+  const precio = precioOverride > 0 ? precioOverride : num(prod.precio_venta);
   const total = Math.round(precio * cantidad);
 
   const ins = await sb
@@ -294,7 +323,7 @@ export async function agregarItemPg(params: {
       empresa_id: params.empresaId,
       sesion_id: sesion.id,
       producto_id: params.productoId,
-      producto_nombre: prod.nombre,
+      producto_nombre: params.displayName || prod.nombre,
       sku: prod.sku,
       cantidad,
       precio_unitario: precio,
@@ -302,6 +331,7 @@ export async function agregarItemPg(params: {
       observacion: params.observacion,
       estado: "pendiente",
       creado_por: params.creadoPor,
+      ...mitadInsertCols(params.displayName ?? null, params.mitad),
     })
     .select(ITEM_COLS)
     .single();
@@ -701,6 +731,9 @@ export async function agregarItemCajaPg(params: {
   cantidad: number; observacion: string | null; cajeroId: string | null;
   /** Precio unitario editado en caja (IVA incluido). Si no viene, usa el precio del producto. */
   precioUnitario?: number | null;
+  /** Nombre a mostrar (ej. "Pizza mitad y mitad"). */
+  displayName?: string | null;
+  mitad?: MitadMitadInput | null;
 }): Promise<MesaSesionItem> {
   const sb = createServiceRoleClientWithDbSchema(params.schema);
   await sesionEditable(sb, params.empresaId, params.sesionId);
@@ -719,9 +752,10 @@ export async function agregarItemCajaPg(params: {
 
   const ins = await sb.from("mesa_sesion_items").insert({
     empresa_id: params.empresaId, sesion_id: params.sesionId, producto_id: params.productoId,
-    producto_nombre: prod.nombre, sku: prod.sku, cantidad, precio_unitario: precio,
+    producto_nombre: params.displayName || prod.nombre, sku: prod.sku, cantidad, precio_unitario: precio,
     total: Math.round(precio * cantidad), observacion: params.observacion,
     estado: "pendiente", creado_por: params.cajeroId,
+    ...mitadInsertCols(params.displayName ?? null, params.mitad),
   }).select(ITEM_COLS).single();
   if (ins.error) throw new Error(ins.error.message);
   return mapItem(ins.data as Record<string, unknown>);

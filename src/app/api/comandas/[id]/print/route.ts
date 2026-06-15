@@ -52,7 +52,9 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ id: str
   const vigentes = c.items.filter((it) => !it.cancelado);
   const itemsHtml = vigentes
     .map((it) => {
-      const obs = it.observacion ? `<tr class="sub"><td></td><td colspan="2">&gt;&gt; ${escapeHtml(it.observacion)}</td></tr>` : "";
+      const mitad = it.es_mitad_mitad && it.mitad_1_nombre && it.mitad_2_nombre
+        ? `<tr class="sub"><td></td><td colspan="2">½ ${escapeHtml(it.mitad_1_nombre)} + ½ ${escapeHtml(it.mitad_2_nombre)}</td></tr>` : "";
+      const obs = (it.observacion ? `<tr class="sub"><td></td><td colspan="2">&gt;&gt; ${escapeHtml(it.observacion)}</td></tr>` : "") + mitad;
       if (conPrecios) {
         return `
           <tr><td class="qty"><strong>${it.cantidad}×</strong></td><td class="name">${escapeHtml(it.producto_nombre)}</td><td class="amt">${formatGs(it.total)}</td></tr>

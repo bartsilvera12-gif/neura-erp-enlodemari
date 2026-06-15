@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import MontoInput from "@/components/ui/MontoInput";
 import ProductPickerModal, { type ProductoPickerItem, type AgregarVentaPayload } from "@/components/inventario/ProductPickerModal";
+import MitadMitadPicker, { type MitadMitadResult } from "@/components/ventas/MitadMitadPicker";
 import { saveVenta } from "@/lib/ventas/storage";
 import { getCajaAbierta } from "@/lib/caja/storage";
 import { calcularLineaVenta } from "@/lib/ventas/iva";
@@ -123,6 +124,36 @@ export default function NuevaVentaPage() {
   // Arranca abierto: al entrar a "Nueva venta" el cajero ve directo el buscador
   // de productos, sin un clic extra sobre el campo. Mejor experiencia en caja.
   const [pickerOpen, setPickerOpen] = useState(true);
+  const [mitadOpen, setMitadOpen] = useState(false);
+
+  /** Agrega una pizza mitad y mitad como una línea (precio = max de ambos sabores). */
+  function handleAgregarMitad(r: MitadMitadResult) {
+    const { subtotal, monto_iva: montoIva, total_linea: totalLinea } = calcularLineaVenta(r.precio_unitario, 1, "10%");
+    setItems((prev) => [
+      ...prev,
+      {
+        producto_id: r.producto_id,
+        producto_nombre: r.display_name,
+        sku: r.sku,
+        cantidad: 1,
+        precio_venta_original: r.precio_unitario,
+        precio_venta: r.precio_unitario,
+        tipo_iva: "10%",
+        subtotal,
+        monto_iva: montoIva,
+        total_linea: totalLinea,
+        sector_produccion: "pizzeria",
+        es_mitad_mitad: true,
+        mitad_1_producto_id: r.mitad.producto1_id,
+        mitad_2_producto_id: r.mitad.producto2_id,
+        mitad_1_nombre: r.mitad.nombre1,
+        mitad_2_nombre: r.mitad.nombre2,
+        item_display_name: r.display_name,
+      },
+    ]);
+    setErrorVenta(null);
+    setMitadOpen(false);
+  }
 
   function pickerToProducto(p: ProductoPickerItem): Producto {
     return {
@@ -453,7 +484,16 @@ export default function NuevaVentaPage() {
 
         {/* ── SECCIÓN 1: Agregar producto ───────────────────────────────────── */}
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4 sm:p-6">
-          <SectionTitle>Agregar producto</SectionTitle>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <SectionTitle>Agregar producto</SectionTitle>
+            <button
+              type="button"
+              onClick={() => setMitadOpen(true)}
+              className="shrink-0 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+            >
+              🍕 Pizza mitad y mitad
+            </button>
+          </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:items-end">
 
@@ -671,6 +711,9 @@ export default function NuevaVentaPage() {
                       <tr key={idx} className="border-b border-slate-200 last:border-0 hover:bg-slate-50 transition-colors">
                         <td className="py-3 pr-3 font-medium text-gray-800">
                           {item.producto_nombre}
+                          {item.es_mitad_mitad && item.mitad_1_nombre && item.mitad_2_nombre && (
+                            <span className="block text-xs font-normal text-amber-700">½ {item.mitad_1_nombre} + ½ {item.mitad_2_nombre}</span>
+                          )}
                         </td>
                         <td className="hidden py-3 pr-3 font-mono text-xs text-gray-500 lg:table-cell">
                           {item.sku}
@@ -986,6 +1029,8 @@ export default function NuevaVentaPage() {
         tipoCambio={tipoCambioNum}
         ivaDefault={lineaIva}
       />
+
+      <MitadMitadPicker open={mitadOpen} onClose={() => setMitadOpen(false)} onConfirm={handleAgregarMitad} />
     </div>
   );
 }

@@ -23,6 +23,10 @@ export interface ComandaItem {
   total: number;
   /** estado del ítem en la cuenta (cancelado en Mesas), no de la comanda. */
   cancelado: boolean;
+  /** Pizza mitad y mitad: sabores para la sub-línea "½ X + ½ Y". */
+  es_mitad_mitad?: boolean;
+  mitad_1_nombre?: string | null;
+  mitad_2_nombre?: string | null;
 }
 
 export interface ComandaCard {

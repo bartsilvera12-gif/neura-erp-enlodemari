@@ -15,6 +15,15 @@ export interface LineaVenta {
   subtotal:              number;  // base imponible = total_linea − monto_iva
   monto_iva:             number;  // IVA INCLUIDO en el precio (no se suma encima)
   total_linea:           number;  // precio_venta × cantidad (IVA incluido) = subtotal + monto_iva
+  /** Sector de producción del producto (para decidir copias de impresión en el front). */
+  sector_produccion?:    "ninguno" | "pizzeria" | "plancha";
+  /** Pizza mitad y mitad (metadata; precio_venta ya es el max de ambos sabores). */
+  es_mitad_mitad?:       boolean;
+  mitad_1_producto_id?:  string | null;
+  mitad_2_producto_id?:  string | null;
+  mitad_1_nombre?:       string | null;
+  mitad_2_nombre?:       string | null;
+  item_display_name?:    string | null;
 }
 
 /** Cabecera de venta: condiciones comerciales + totales consolidados. */

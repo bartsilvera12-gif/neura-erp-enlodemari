@@ -12,6 +12,13 @@ export interface CreateVentaItemInput {
   subtotal: number;
   monto_iva: number;
   total_linea: number;
+  /** Pizza mitad y mitad (metadata; precio ya viene como max de ambos sabores). */
+  es_mitad_mitad?: boolean;
+  mitad_1_producto_id?: string | null;
+  mitad_2_producto_id?: string | null;
+  mitad_1_nombre?: string | null;
+  mitad_2_nombre?: string | null;
+  item_display_name?: string | null;
 }
 
 export interface CreateVentaPedidoCocinaInput {
@@ -228,6 +235,12 @@ export async function createVentaTransaccionalPg(
       subtotal: line.subtotal,
       monto_iva: line.monto_iva,
       total_linea: line.total_linea,
+      es_mitad_mitad: line.es_mitad_mitad === true,
+      mitad_1_producto_id: line.mitad_1_producto_id ?? null,
+      mitad_2_producto_id: line.mitad_2_producto_id ?? null,
+      mitad_1_nombre: line.mitad_1_nombre ?? null,
+      mitad_2_nombre: line.mitad_2_nombre ?? null,
+      item_display_name: line.item_display_name ?? null,
     }));
     const insItems = await sb.from("ventas_items").insert(itemsRows);
     if (insItems.error) throw new Error(insItems.error.message);

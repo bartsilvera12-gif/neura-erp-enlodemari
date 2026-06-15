@@ -50,6 +50,11 @@ export interface MesaSesionItem {
   estado: EstadoItemMesa;
   comanda_id: string | null;
   enviado_at: string | null;
+  /** Pizza mitad y mitad (metadata; precio_unitario ya es el max de ambos sabores). */
+  es_mitad_mitad?: boolean;
+  mitad_1_nombre?: string | null;
+  mitad_2_nombre?: string | null;
+  item_display_name?: string | null;
 }
 
 /** Una comanda enviada a cocina (un envío de ítems de una sesión). */

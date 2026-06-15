@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireModule } from "@/lib/middleware/require-module";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { agregarItemPg } from "@/lib/mesas/server/mesas-pg";
+import { parseMitadFromBody } from "@/lib/mesas/mitad-parse";
 import { successResponse, errorResponse } from "@/lib/api/response";
 
 /** POST /api/mesas/[id]/items — agrega un producto a la cuenta (auto-abre sesión). */
@@ -20,11 +21,13 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
     const cantidad = Number(o.cantidad);
     if (!Number.isFinite(cantidad) || cantidad <= 0) return NextResponse.json(errorResponse("Cantidad inválida."), { status: 400 });
     const observacion = o.observacion == null || o.observacion === "" ? null : String(o.observacion).slice(0, 2000);
+    const { precioUnitario, displayName, mitad } = parseMitadFromBody(o);
 
     const schema = await fetchDataSchemaForEmpresaId(auth.empresa_id);
     const item = await agregarItemPg({
       schema, empresaId: auth.empresa_id, mesaId: id,
       productoId, cantidad, observacion, creadoPor: auth.usuarioCatalogId ?? null,
+      precioUnitario, displayName, mitad,
     });
     return NextResponse.json(successResponse({ item }));
   } catch (err) {

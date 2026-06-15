@@ -30,7 +30,16 @@ export async function getMesaDetalle(mesaId: string): Promise<MesaDetalle | null
   return r.success ? r.detalle : null;
 }
 
-export function agregarItemMesa(mesaId: string, payload: { producto_id: string; cantidad: number; observacion: string | null }) {
+export interface MitadItemPayload {
+  precio_unitario?: number;
+  display_name?: string;
+  mitad?: { producto1_id: string; producto2_id: string; nombre1: string; nombre2: string };
+}
+
+export function agregarItemMesa(
+  mesaId: string,
+  payload: { producto_id: string; cantidad: number; observacion: string | null } & MitadItemPayload
+) {
   return call<{ item: MesaSesionItem }>(`/api/mesas/${encodeURIComponent(mesaId)}/items`, "POST", payload);
 }
 

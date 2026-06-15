@@ -70,6 +70,11 @@ export async function GET(request: NextRequest) {
       .eq("activo", true)
       .eq("es_vendible", true);
 
+    const sectorParam = (url.searchParams.get("sector") ?? "").trim().toLowerCase();
+    if (sectorParam === "pizzeria" || sectorParam === "plancha" || sectorParam === "ninguno") {
+      query = query.eq("sector_produccion", sectorParam);
+    }
+
     if (q.length > 0) {
       const pat = `%${escapeIlikePattern(q)}%`;
       query = query.or(`nombre.ilike.${pat},sku.ilike.${pat},codigo_barras.ilike.${pat}`);

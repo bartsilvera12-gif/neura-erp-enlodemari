@@ -238,67 +238,98 @@ function CerrarCajaModal({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const contado = parseFloat(monto) || 0;
-  const esperado = resumen.efectivo_esperado;
-  const diferencia = contado - esperado;
+  // ── Derivados (NO cambian la fórmula del backend) ──────────────────────────
+  const apertura = caja.monto_apertura;
+  const transf = resumen.total_transferencia;
+  const tarjeta = resumen.total_tarjeta;
+  const ajustes = resumen.ajustes_efectivo;
+  // Efectivo FÍSICO esperado (fuente de verdad del backend): apertura + ventas
+  // efectivo + ingresos − egresos − retiros (+ ajustes). Vuelto NO cuenta: las
+  // ventas en efectivo ya son el total real de la venta, no el monto recibido.
+  const efectivoEsperado = resumen.efectivo_esperado;
+  // Neto de movimientos manuales de efectivo (para que el cierre total cuadre).
+  const manualNet = resumen.ingresos_efectivo - resumen.egresos_efectivo - resumen.retiros_efectivo + ajustes;
+  // Cierre TOTAL esperado del turno = efectivo físico + transferencias + tarjetas
+  //                                  = apertura + total vendido (+ movs. manuales).
+  const cierreTotalEsperado = efectivoEsperado + transf + tarjeta;
+
+  const contado = parseFloat(monto) || 0;            // efectivo FÍSICO contado
+  const difEfectivo = contado - efectivoEsperado;    // diferencia de efectivo físico
+  const totalDeclarado = contado + transf + tarjeta; // efectivo contado + medios electrónicos
+  const difTotal = totalDeclarado - cierreTotalEsperado;
 
   async function submit() {
     setError(null);
     setSaving(true);
+    // El backend cierra con el efectivo físico contado (diferencia = contado − esperado).
     const r = await cerrarCaja(contado, obs.trim() || null, caja.id);
     setSaving(false);
     if (!r.success) { setError(r.error); return; }
     onDone();
   }
 
-  const ajustes = resumen.ajustes_efectivo;
-
   return (
     <ModalShell title={`Cerrar caja N° ${caja.numero_caja}`} onClose={onClose}>
-      {/* 1 · Resumen de ventas del turno (transferencia/tarjeta cuentan al total, no al efectivo) */}
+      {/* 1 · Resumen de ventas del turno */}
       <SectionLabel>Resumen de ventas del turno</SectionLabel>
       <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
         <Row label="Cantidad de ventas" value={String(resumen.cantidad_ventas)} />
         <Row label="Ventas en efectivo" value={formatGs(resumen.total_efectivo)} />
-        <Row label="Ventas por transferencia" value={formatGs(resumen.total_transferencia)} />
-        <Row label="Ventas con tarjeta" value={formatGs(resumen.total_tarjeta)} />
+        <Row label="Ventas por transferencia" value={formatGs(transf)} />
+        <Row label="Ventas con tarjeta" value={formatGs(tarjeta)} />
         <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-slate-900">
           <span>Total vendido</span><span className="tabular-nums">{formatGs(resumen.total_vendido)}</span>
         </div>
       </div>
-      <p className="mt-1.5 text-[11px] leading-snug text-slate-400">
-        Transferencia y tarjeta suman al total vendido, pero <strong>no</strong> al efectivo que debería haber en caja.
-      </p>
 
-      {/* 2 · Arqueo de efectivo → Debería haber en caja (misma fórmula, no se modifica) */}
-      <SectionLabel className="mt-4">Arqueo de efectivo</SectionLabel>
-      <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-        <Row label="Monto de apertura" value={formatGs(caja.monto_apertura)} />
-        <Row label="Ventas en efectivo" value={`+ ${formatGs(resumen.total_efectivo)}`} />
-        <Row label="Ingresos manuales" value={`+ ${formatGs(resumen.ingresos_efectivo)}`} />
-        <Row label="Egresos manuales" value={`− ${formatGs(resumen.egresos_efectivo)}`} />
-        <Row label="Retiros de efectivo" value={`− ${formatGs(resumen.retiros_efectivo)}`} />
-        {ajustes !== 0 && (
-          <Row label="Ajustes de efectivo" value={`${ajustes > 0 ? "+" : "−"} ${formatGs(Math.abs(ajustes))}`} />
-        )}
-        <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-slate-900">
-          <span>Debería haber en caja</span><span className="tabular-nums">{formatGs(esperado)}</span>
+      {/* 2 · Cierre total del turno (número protagonista) */}
+      <SectionLabel className="mt-4">Cierre total del turno</SectionLabel>
+      <div className="rounded-xl border border-sky-200 bg-sky-50 p-3.5">
+        <div className="space-y-1.5 text-sm">
+          <Row label="Monto de apertura" value={formatGs(apertura)} />
+          <Row label="Total vendido" value={`+ ${formatGs(resumen.total_vendido)}`} />
+          {manualNet !== 0 && (
+            <Row label="Movimientos manuales de efectivo" value={`${manualNet > 0 ? "+" : "−"} ${formatGs(Math.abs(manualNet))}`} />
+          )}
+        </div>
+        <div className="mt-2.5 flex items-baseline justify-between border-t border-sky-200 pt-2.5">
+          <span className="text-sm font-semibold text-sky-900">Cierre total esperado</span>
+          <span className="text-xl font-extrabold tabular-nums text-sky-900">{formatGs(cierreTotalEsperado)}</span>
         </div>
       </div>
 
-      {/* 3 · Cierre */}
-      <SectionLabel className="mt-4">Cierre</SectionLabel>
-      <label className="mb-1.5 block text-sm font-medium text-slate-700">Efectivo contado (Gs.)</label>
-      <MontoInput value={monto} onChange={(n) => setMonto(String(n))} placeholder="Ej: 400.000" className={inputClass} decimals={false} />
+      {/* 3 · Desglose del cierre (cómo se compone ese total) */}
+      <SectionLabel className="mt-4">Desglose del cierre</SectionLabel>
+      <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+        <Row label="Efectivo físico esperado" value={formatGs(efectivoEsperado)} />
+        <Row label="Transferencias registradas" value={`+ ${formatGs(transf)}`} />
+        <Row label="Tarjetas registradas" value={`+ ${formatGs(tarjeta)}`} />
+        <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-slate-900">
+          <span>Total cierre esperado</span><span className="tabular-nums">{formatGs(cierreTotalEsperado)}</span>
+        </div>
+      </div>
+      <p className="mt-1.5 text-[11px] leading-snug text-slate-400">
+        El <strong>efectivo físico esperado</strong> es apertura + ventas en efectivo + ingresos − egresos − retiros.
+        Transferencias y tarjetas suman al cierre total, pero <strong>no</strong> al efectivo físico.
+      </p>
 
+      {/* 4 · Cierre: solo efectivo físico contado */}
+      <SectionLabel className="mt-4">Cierre</SectionLabel>
+      <label className="mb-1.5 block text-sm font-medium text-slate-700">Efectivo físico contado en caja (Gs.)</label>
+      <MontoInput value={monto} onChange={(n) => setMonto(String(n))} placeholder="Ej: 160.000" className={inputClass} decimals={false} />
+      <p className="mt-1 text-[11px] leading-snug text-slate-400">
+        Ingresá solo el dinero físico disponible en caja. Transferencias y tarjetas ya se toman desde las ventas registradas.
+      </p>
+
+      {/* 5 · Diferencias */}
       {monto !== "" && (
-        <div className={`mt-2 flex justify-between rounded-lg px-3 py-2 text-sm font-semibold ${
-          diferencia === 0 ? "bg-emerald-50 text-emerald-700"
-          : diferencia > 0 ? "bg-sky-50 text-sky-700"
-          : "bg-red-50 text-red-700"
-        }`}>
-          <span>Diferencia {diferencia > 0 ? "(sobra)" : diferencia < 0 ? "(falta)" : ""}</span>
-          <span className="tabular-nums">{formatGs(diferencia)}</span>
+        <div className="mt-3 space-y-2">
+          <DiffRow label="Diferencia de efectivo físico" hint={`contado − esperado (${formatGs(efectivoEsperado)})`} value={difEfectivo} />
+          <div className="flex justify-between rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+            <span>Total declarado (efectivo + transferencias + tarjetas)</span>
+            <span className="tabular-nums font-medium text-slate-700">{formatGs(totalDeclarado)}</span>
+          </div>
+          <DiffRow label="Diferencia total del turno" hint={`declarado − cierre total (${formatGs(cierreTotalEsperado)})`} value={difTotal} />
         </div>
       )}
 
@@ -326,6 +357,22 @@ function Row({ label, value }: { label: string; value: string }) {
 function SectionLabel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <p className={`mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 ${className}`}>{children}</p>
+  );
+}
+
+/** Fila de diferencia con signo y color (verde = cuadra, azul = sobra, rojo = falta). */
+function DiffRow({ label, hint, value }: { label: string; hint: string; value: number }) {
+  const tone = value === 0 ? "bg-emerald-50 text-emerald-700" : value > 0 ? "bg-sky-50 text-sky-700" : "bg-red-50 text-red-700";
+  const signo = value > 0 ? "+ " : value < 0 ? "− " : "";
+  const estado = value > 0 ? "(sobra)" : value < 0 ? "(falta)" : "(cuadra)";
+  return (
+    <div className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-semibold ${tone}`}>
+      <span>
+        {label} <span className="font-normal opacity-70">{estado}</span>
+        <span className="mt-0.5 block text-[10px] font-normal opacity-60">{hint}</span>
+      </span>
+      <span className="tabular-nums">{signo}{formatGs(Math.abs(value))}</span>
+    </div>
   );
 }
 

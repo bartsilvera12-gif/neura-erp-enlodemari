@@ -25,7 +25,7 @@ export async function getSesionPorCobrar(sesionId: string): Promise<MesaDetalle 
   return r.success ? r.detalle : null;
 }
 
-export function agregarItemCaja(sesionId: string, payload: { producto_id: string; cantidad: number; observacion: string | null }) {
+export function agregarItemCaja(sesionId: string, payload: { producto_id: string; cantidad: number; observacion: string | null; precio_unitario?: number | null }) {
   return call<{ item: MesaSesionItem }>(`/api/ventas/mesas-por-cobrar/${encodeURIComponent(sesionId)}/items`, "POST", payload);
 }
 

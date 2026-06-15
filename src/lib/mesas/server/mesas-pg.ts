@@ -646,6 +646,8 @@ export async function getSesionDetallePg(schema: string, empresaId: string, sesi
 export async function agregarItemCajaPg(params: {
   schema: string; empresaId: string; sesionId: string; productoId: string;
   cantidad: number; observacion: string | null; cajeroId: string | null;
+  /** Precio unitario editado en caja (IVA incluido). Si no viene, usa el precio del producto. */
+  precioUnitario?: number | null;
 }): Promise<MesaSesionItem> {
   const sb = createServiceRoleClientWithDbSchema(params.schema);
   await sesionEditable(sb, params.empresaId, params.sesionId);
@@ -657,7 +659,10 @@ export async function agregarItemCajaPg(params: {
   const prod = pQ.data as { nombre: string; sku: string | null; precio_venta: number | string };
   const cantidad = num(params.cantidad);
   if (cantidad <= 0) throw new Error("La cantidad debe ser mayor a 0.");
-  const precio = num(prod.precio_venta);
+  // Precio: el editado por caja (si es válido > 0) o el del catálogo. facturarSesionPg
+  // lee precio_unitario del ítem, así que el override se respeta en la venta final.
+  const precioOverride = params.precioUnitario != null ? num(params.precioUnitario) : 0;
+  const precio = precioOverride > 0 ? precioOverride : num(prod.precio_venta);
 
   const ins = await sb.from("mesa_sesion_items").insert({
     empresa_id: params.empresaId, sesion_id: params.sesionId, producto_id: params.productoId,

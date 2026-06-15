@@ -18,11 +18,14 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ sesion
     const cantidad = Number(o.cantidad);
     if (!Number.isFinite(cantidad) || cantidad <= 0) return NextResponse.json(errorResponse("Cantidad inválida."), { status: 400 });
     const observacion = o.observacion == null || o.observacion === "" ? null : String(o.observacion).slice(0, 2000);
+    const precioRaw = o.precio_unitario;
+    const precioUnitario = precioRaw == null || precioRaw === "" ? null
+      : (Number.isFinite(Number(precioRaw)) && Number(precioRaw) > 0 ? Number(precioRaw) : null);
 
     const schema = await fetchDataSchemaForEmpresaId(gate.auth.empresa_id);
     const item = await agregarItemCajaPg({
       schema, empresaId: gate.auth.empresa_id, sesionId, productoId, cantidad, observacion,
-      cajeroId: gate.auth.usuarioCatalogId ?? null,
+      cajeroId: gate.auth.usuarioCatalogId ?? null, precioUnitario,
     });
     return NextResponse.json(successResponse({ item }));
   } catch (err) {

@@ -6,6 +6,7 @@ export interface CuentaBancaria {
   nombre: string;
   banco: string | null;
   numero_cuenta: string | null;
+  tipo: string | null;
   moneda: string;
   activo: boolean;
 }

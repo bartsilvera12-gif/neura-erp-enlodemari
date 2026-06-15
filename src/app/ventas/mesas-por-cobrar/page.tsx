@@ -167,7 +167,13 @@ function MesaCard({ m, cuentas, onError, onFacturada, onChanged }: {
           )}
           {metodo === "tarjeta" && (
             <div className="mt-3 space-y-2">
-              <input value={pago.entidad ?? ""} onChange={(e) => setPago((p) => ({ ...p, entidad: e.target.value }))} placeholder="POS / entidad" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              {cuentas.length > 0 && (
+                <select value={pago.cuenta_bancaria_id ?? ""} onChange={(e) => setPago((p) => ({ ...p, cuenta_bancaria_id: e.target.value || null }))} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                  <option value="">POS / entidad…</option>
+                  {cuentas.map((c) => <option key={c.id} value={c.id}>{c.nombre}{c.tipo ? ` (${c.tipo})` : ""}</option>)}
+                </select>
+              )}
+              <input value={pago.entidad ?? ""} onChange={(e) => setPago((p) => ({ ...p, entidad: e.target.value }))} placeholder="POS / entidad (texto libre)" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
               <div className="grid grid-cols-2 gap-1">
                 {["debito", "credito"].map((t) => (
                   <button key={t} onClick={() => setPago((p) => ({ ...p, tipo_tarjeta: t }))}

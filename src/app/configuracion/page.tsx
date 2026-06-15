@@ -6,6 +6,7 @@ import {
   FileText,
   GitBranch,
   Inbox,
+  Landmark,
   LayoutGrid,
   MessageCircle,
   Percent,
@@ -77,6 +78,17 @@ export default function ConfiguracionPage() {
           </p>
         </div>
         <ul className="m-0 grid list-none gap-4 p-0 sm:grid-cols-2 xl:grid-cols-3">
+          <li>
+            <SettingsModuleCard
+              title="Entidades bancarias"
+              subtitle="EMPRESA · COBROS"
+              description="Bancos, POS y cuentas para conciliación."
+              icon={Landmark}
+              badge={editorBadge}
+              href="/configuracion/entidades-bancarias"
+              actionLabel="Configurar"
+            />
+          </li>
           <li>
             <SettingsModuleCard
               title="Facturación"

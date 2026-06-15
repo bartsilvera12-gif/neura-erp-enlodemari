@@ -13,13 +13,13 @@ const COLS =
 
 export async function listarCuentasBancariasPg(schema: string, empresaId: string): Promise<CuentaBancaria[]> {
   const sb = createServiceRoleClientWithDbSchema(schema);
-  const q = await sb.from("cuentas_bancarias").select("id, nombre, banco, numero_cuenta, moneda, activo")
+  const q = await sb.from("cuentas_bancarias").select("id, nombre, banco, numero_cuenta, tipo, moneda, activo")
     .eq("empresa_id", empresaId).eq("activo", true).order("nombre");
   if (q.error) throw new Error(q.error.message);
   return (q.data ?? []).map((r) => {
     const x = r as Record<string, unknown>;
     return { id: String(x.id), nombre: String(x.nombre ?? ""), banco: (x.banco as string) ?? null,
-      numero_cuenta: (x.numero_cuenta as string) ?? null, moneda: String(x.moneda ?? "PYG"), activo: x.activo !== false };
+      numero_cuenta: (x.numero_cuenta as string) ?? null, tipo: (x.tipo as string) ?? null, moneda: String(x.moneda ?? "PYG"), activo: x.activo !== false };
   });
 }
 

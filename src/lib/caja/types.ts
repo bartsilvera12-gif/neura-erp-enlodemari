@@ -78,9 +78,18 @@ export interface VentaDeCaja {
 }
 
 /** Detalle completo de una caja: arqueo + movimientos + ventas asociadas. */
+/** Desglose de conciliación bancaria asociada a la caja (no afecta efectivo esperado). */
+export interface ConciliacionCaja {
+  transferencia_pendiente: number;
+  transferencia_aprobada: number;
+  tarjeta_pendiente: number;
+  tarjeta_aprobada: number;
+}
+
 export interface CajaDetalle {
   resumen: CajaResumen;
   ventas: VentaDeCaja[];
+  conciliacion: ConciliacionCaja;
 }
 
 /**

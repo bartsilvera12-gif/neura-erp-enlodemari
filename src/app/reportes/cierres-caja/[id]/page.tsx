@@ -88,6 +88,15 @@ export default function CajaDetallePage({ params }: { params: Promise<{ id: stri
           <Field label="Tarjeta" value={formatGs(resumen.total_tarjeta)} />
         </div>
         <p className="mt-2 text-[11px] text-slate-400">Transferencia y tarjeta cuentan como ventas, pero no como efectivo esperado.</p>
+        <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-4">
+          <Field label="Transfer. pendiente" value={formatGs(det.conciliacion.transferencia_pendiente)} tone={det.conciliacion.transferencia_pendiente > 0 ? "info" : undefined} />
+          <Field label="Transfer. aprobada" value={formatGs(det.conciliacion.transferencia_aprobada)} tone="ok" />
+          <Field label="Tarjeta pendiente" value={formatGs(det.conciliacion.tarjeta_pendiente)} tone={det.conciliacion.tarjeta_pendiente > 0 ? "info" : undefined} />
+          <Field label="Tarjeta aprobada" value={formatGs(det.conciliacion.tarjeta_aprobada)} tone="ok" />
+        </div>
+        <p className="mt-1 text-[11px] text-slate-400">
+          <a href="/reportes/conciliacion-bancaria" className="text-[#0EA5E9] hover:underline">Ver conciliación bancaria →</a>
+        </p>
       </div>
 
       {/* Movimientos de caja */}

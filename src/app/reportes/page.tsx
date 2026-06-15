@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { BarChart3, Receipt } from "lucide-react";
+import { BarChart3, Receipt, Landmark } from "lucide-react";
 
 function ReportCard({
   href, titulo, descripcion, boton, icon: Icon,
@@ -53,6 +53,13 @@ export default function ReportesPage() {
           descripcion="Resumen financiero por cajas cerradas."
           boton="Ver estado"
           icon={Receipt}
+        />
+        <ReportCard
+          href="/reportes/conciliacion-bancaria"
+          titulo="Conciliación bancaria"
+          descripcion="Control de pagos por transferencia y tarjeta asociados a cajas y ventas."
+          boton="Ver conciliación"
+          icon={Landmark}
         />
       </div>
     </div>

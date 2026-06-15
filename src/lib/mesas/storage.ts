@@ -57,10 +57,23 @@ export async function getMesasPorCobrar(): Promise<MesaConResumen[]> {
   return r.success ? r.mesas : [];
 }
 
-export function facturarMesa(sesionId: string, metodoPago: "efectivo" | "tarjeta" | "transferencia") {
+export interface PagoConciliacionInput {
+  referencia?: string | null;
+  entidad?: string | null;
+  tipo_tarjeta?: string | null;
+  cuenta_bancaria_id?: string | null;
+  fecha_pago?: string | null;
+  observacion?: string | null;
+}
+
+export function facturarMesa(
+  sesionId: string,
+  metodoPago: "efectivo" | "tarjeta" | "transferencia",
+  pago?: PagoConciliacionInput | null
+) {
   return call<{ ventaId: string; numeroControl: string | null; yaFacturada: boolean }>(
     `/api/mesas/sesiones/${encodeURIComponent(sesionId)}/facturar`,
     "POST",
-    { metodo_pago: metodoPago }
+    { metodo_pago: metodoPago, pago: pago ?? null }
   );
 }

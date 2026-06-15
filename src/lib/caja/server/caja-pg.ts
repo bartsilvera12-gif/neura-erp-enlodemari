@@ -166,7 +166,20 @@ export async function getCajaDetallePg(
     cantidad_items: countByVenta.get(r.id) ?? 0,
   }));
 
-  return { resumen, ventas };
+  // Conciliación bancaria de esta caja (transfer/tarjeta, pendiente/aprobada).
+  const conciliacion = { transferencia_pendiente: 0, transferencia_aprobada: 0, tarjeta_pendiente: 0, tarjeta_aprobada: 0 };
+  const cQ = await sb.from("conciliacion_pagos").select("medio_pago, estado, monto").eq("empresa_id", empresaId).eq("caja_id", cajaId);
+  if (!cQ.error) {
+    for (const x of (cQ.data ?? []) as Array<{ medio_pago: string; estado: string; monto: number | string }>) {
+      const m = num(x.monto);
+      if (x.medio_pago === "transferencia" && x.estado === "pendiente") conciliacion.transferencia_pendiente += m;
+      else if (x.medio_pago === "transferencia" && x.estado === "aprobado") conciliacion.transferencia_aprobada += m;
+      else if (x.medio_pago === "tarjeta" && x.estado === "pendiente") conciliacion.tarjeta_pendiente += m;
+      else if (x.medio_pago === "tarjeta" && x.estado === "aprobado") conciliacion.tarjeta_aprobada += m;
+    }
+  }
+
+  return { resumen, ventas, conciliacion };
 }
 
 /**

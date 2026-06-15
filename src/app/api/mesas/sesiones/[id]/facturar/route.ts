@@ -20,11 +20,21 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
     const o = (body ?? {}) as Record<string, unknown>;
     const metodoPago: "efectivo" | "tarjeta" | "transferencia" =
       o.metodo_pago === "tarjeta" || o.metodo_pago === "transferencia" ? o.metodo_pago : "efectivo";
+    const pagoRaw = (o.pago ?? null) as Record<string, unknown> | null;
+    const str = (v: unknown) => (v == null || v === "" ? null : String(v).slice(0, 2000));
+    const pago = pagoRaw ? {
+      referencia: str(pagoRaw.referencia),
+      entidad: str(pagoRaw.entidad),
+      tipo_tarjeta: str(pagoRaw.tipo_tarjeta),
+      cuenta_bancaria_id: str(pagoRaw.cuenta_bancaria_id),
+      fecha_pago: str(pagoRaw.fecha_pago),
+      observacion: str(pagoRaw.observacion),
+    } : null;
 
     const schema = await fetchDataSchemaForEmpresaId(auth.empresa_id);
     const result = await facturarSesionPg({
       schema, empresaId: auth.empresa_id, sesionId: id,
-      metodoPago, usuarioId: auth.usuarioCatalogId ?? null,
+      metodoPago, usuarioId: auth.usuarioCatalogId ?? null, pago,
     });
     return NextResponse.json(successResponse(result));
   } catch (err) {

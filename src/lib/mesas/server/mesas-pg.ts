@@ -473,6 +473,15 @@ export async function facturarSesionPg(params: {
   sesionId: string;
   metodoPago: "efectivo" | "tarjeta" | "transferencia";
   usuarioId: string | null;
+  /** Datos de conciliación para tarjeta/transferencia (estado inicial: pendiente). */
+  pago?: {
+    referencia?: string | null;
+    entidad?: string | null;
+    tipo_tarjeta?: string | null;
+    cuenta_bancaria_id?: string | null;
+    fecha_pago?: string | null;
+    observacion?: string | null;
+  } | null;
 }): Promise<{ ventaId: string; numeroControl: string | null; yaFacturada: boolean }> {
   const sb = createServiceRoleClientWithDbSchema(params.schema);
 
@@ -575,9 +584,116 @@ export async function facturarSesionPg(params: {
     if (setVenta.error) throw new Error(setVenta.error.message);
     await sb.from("mesas").update({ estado: "libre" }).eq("empresa_id", params.empresaId).eq("id", ses.mesa_id);
 
+    // Transferencia/tarjeta → registro de conciliación PENDIENTE (no afecta efectivo).
+    if (params.metodoPago === "tarjeta" || params.metodoPago === "transferencia") {
+      const p = params.pago ?? {};
+      const cins = await sb.from("conciliacion_pagos").insert({
+        empresa_id: params.empresaId,
+        venta_id: ventaId,
+        caja_id: caja.id,
+        mesa_sesion_id: ses.id,
+        cuenta_bancaria_id: p.cuenta_bancaria_id || null,
+        medio_pago: params.metodoPago,
+        monto: tot,
+        referencia: p.referencia || null,
+        entidad: p.entidad || null,
+        tipo_tarjeta: p.tipo_tarjeta || null,
+        fecha_pago: p.fecha_pago || null,
+        estado: "pendiente",
+        observacion: p.observacion || null,
+        registrado_por: params.usuarioId,
+      });
+      if (cins.error) throw new Error(cins.error.message);
+    }
+
     return { ventaId, numeroControl, yaFacturada: false };
   } catch (err) {
     await revert().catch(() => {});
     throw err;
   }
+}
+
+// ── Edición desde CAJA de una sesión por_cobrar (antes de facturar) ────────────
+
+async function sesionEditable(sb: Sb, empresaId: string, sesionId: string): Promise<{ id: string }> {
+  const sQ = await sb.from("mesa_sesiones").select("id, estado, venta_id")
+    .eq("empresa_id", empresaId).eq("id", sesionId).maybeSingle();
+  if (sQ.error) throw new Error(sQ.error.message);
+  if (!sQ.data) throw new Error("Sesión no encontrada.");
+  const s = sQ.data as { id: string; estado: string; venta_id: string | null };
+  if (s.venta_id) throw new Error("La mesa ya fue facturada; no se puede editar.");
+  if (s.estado !== "por_cobrar" && s.estado !== "abierta") throw new Error("La cuenta no está editable.");
+  return { id: s.id };
+}
+
+/** Detalle de una sesión (por_cobrar) para que caja la revise/edite. */
+export async function getSesionDetallePg(schema: string, empresaId: string, sesionId: string): Promise<MesaDetalle | null> {
+  const sb = createServiceRoleClientWithDbSchema(schema);
+  const sQ = await sb.from("mesa_sesiones").select(SESION_COLS).eq("empresa_id", empresaId).eq("id", sesionId).maybeSingle();
+  if (sQ.error) throw new Error(sQ.error.message);
+  if (!sQ.data) return null;
+  const sesion = mapSesion(sQ.data as Record<string, unknown>);
+  const mQ = await sb.from("mesas").select(MESA_COLS).eq("empresa_id", empresaId).eq("id", sesion.mesa_id).maybeSingle();
+  const mesa = mQ.data ? mapMesa(mQ.data as Record<string, unknown>) : { id: sesion.mesa_id, numero: 0, nombre: null, estado: "por_cobrar" as const, activo: true };
+  const iQ = await sb.from("mesa_sesion_items").select(ITEM_COLS)
+    .eq("empresa_id", empresaId).eq("sesion_id", sesionId).in("estado", ITEM_VIGENTES).order("created_at", { ascending: true });
+  if (iQ.error) throw new Error(iQ.error.message);
+  const items = (iQ.data ?? []).map((r) => mapItem(r as Record<string, unknown>));
+  return { mesa, sesion, items, total: items.reduce((s, it) => s + it.total, 0) };
+}
+
+/** Caja agrega un producto a una sesión por_cobrar (forma parte de la venta final). */
+export async function agregarItemCajaPg(params: {
+  schema: string; empresaId: string; sesionId: string; productoId: string;
+  cantidad: number; observacion: string | null; cajeroId: string | null;
+}): Promise<MesaSesionItem> {
+  const sb = createServiceRoleClientWithDbSchema(params.schema);
+  await sesionEditable(sb, params.empresaId, params.sesionId);
+
+  const pQ = await sb.from("productos").select("nombre, sku, precio_venta")
+    .eq("empresa_id", params.empresaId).eq("id", params.productoId).maybeSingle();
+  if (pQ.error) throw new Error(pQ.error.message);
+  if (!pQ.data) throw new Error("Producto no encontrado en esta empresa.");
+  const prod = pQ.data as { nombre: string; sku: string | null; precio_venta: number | string };
+  const cantidad = num(params.cantidad);
+  if (cantidad <= 0) throw new Error("La cantidad debe ser mayor a 0.");
+  const precio = num(prod.precio_venta);
+
+  const ins = await sb.from("mesa_sesion_items").insert({
+    empresa_id: params.empresaId, sesion_id: params.sesionId, producto_id: params.productoId,
+    producto_nombre: prod.nombre, sku: prod.sku, cantidad, precio_unitario: precio,
+    total: Math.round(precio * cantidad), observacion: params.observacion,
+    estado: "pendiente", creado_por: params.cajeroId,
+  }).select(ITEM_COLS).single();
+  if (ins.error) throw new Error(ins.error.message);
+  return mapItem(ins.data as Record<string, unknown>);
+}
+
+/** Caja ajusta cantidad o cancela un ítem de una sesión por_cobrar. */
+export async function actualizarItemCajaPg(params: {
+  schema: string; empresaId: string; itemId: string; cantidad?: number; cancelar?: boolean;
+}): Promise<MesaSesionItem> {
+  const sb = createServiceRoleClientWithDbSchema(params.schema);
+  const cur = await sb.from("mesa_sesion_items").select("id, precio_unitario, sesion_id, estado")
+    .eq("empresa_id", params.empresaId).eq("id", params.itemId).maybeSingle();
+  if (cur.error) throw new Error(cur.error.message);
+  if (!cur.data) throw new Error("Ítem no encontrado.");
+  const row = cur.data as { precio_unitario: number | string; sesion_id: string; estado: string };
+  await sesionEditable(sb, params.empresaId, row.sesion_id);
+  if (row.estado === "cancelado") throw new Error("El ítem ya fue cancelado.");
+
+  const patch: Record<string, unknown> = {};
+  if (params.cancelar) patch.estado = "cancelado";
+  else if (params.cantidad != null) {
+    const c = num(params.cantidad);
+    if (c <= 0) throw new Error("La cantidad debe ser mayor a 0.");
+    patch.cantidad = c;
+    patch.total = Math.round(num(row.precio_unitario) * c);
+  }
+  if (Object.keys(patch).length === 0) throw new Error("Nada para actualizar.");
+
+  const upd = await sb.from("mesa_sesion_items").update(patch)
+    .eq("empresa_id", params.empresaId).eq("id", params.itemId).select(ITEM_COLS).single();
+  if (upd.error) throw new Error(upd.error.message);
+  return mapItem(upd.data as Record<string, unknown>);
 }

@@ -302,7 +302,7 @@ export default function FacturarMesaPage({ params }: { params: Promise<{ sesionI
                     <button
                       key={m}
                       type="button"
-                      onClick={() => setMetodo(m)}
+                      onClick={() => { setMetodo(m); setPago({}); }}
                       className={`text-xs py-1.5 rounded-md border transition-colors ${
                         metodo === m
                           ? "border-[#0EA5E9] bg-[#0EA5E9]/10 text-[#0EA5E9] font-medium"
@@ -332,29 +332,26 @@ export default function FacturarMesaPage({ params }: { params: Promise<{ sesionI
                 </div>
               )}
 
-              {/* Datos de transferencia / tarjeta → conciliación pendiente */}
+              {/* Transferencia → solo la cuenta destino (sin re-preguntar el banco). */}
               {metodo === "transferencia" && (
-                <div className="space-y-2">
-                  {cuentas.length > 0 && (
-                    <select value={pago.cuenta_bancaria_id ?? ""} onChange={(e) => setPago((p) => ({ ...p, cuenta_bancaria_id: e.target.value || null }))} className={inputClass}>
-                      <option value="">Cuenta destino…</option>
-                      {cuentas.map((c) => <option key={c.id} value={c.id}>{c.nombre}{c.banco ? ` (${c.banco})` : ""}</option>)}
-                    </select>
-                  )}
-                  <input value={pago.entidad ?? ""} onChange={(e) => setPago((p) => ({ ...p, entidad: e.target.value }))} placeholder="Banco / entidad" className={inputClass} />
-                  <input value={pago.referencia ?? ""} onChange={(e) => setPago((p) => ({ ...p, referencia: e.target.value }))} placeholder="Referencia / N° comprobante" className={inputClass} />
-                  <input value={pago.observacion ?? ""} onChange={(e) => setPago((p) => ({ ...p, observacion: e.target.value }))} placeholder="Observación (opcional)" className={inputClass} />
-                </div>
+                cuentas.length > 0 ? (
+                  <select value={pago.cuenta_bancaria_id ?? ""} onChange={(e) => setPago((p) => ({ ...p, cuenta_bancaria_id: e.target.value || null }))} className={inputClass}>
+                    <option value="">Cuenta destino…</option>
+                    {cuentas.map((c) => <option key={c.id} value={c.id}>{c.nombre}{c.banco ? ` (${c.banco})` : ""}</option>)}
+                  </select>
+                ) : (
+                  <p className="text-[11px] text-amber-600">No hay cuentas configuradas; se registra sin cuenta.</p>
+                )
               )}
+              {/* Tarjeta → cuenta/POS + débito/crédito. Nada más. */}
               {metodo === "tarjeta" && (
                 <div className="space-y-2">
                   {cuentas.length > 0 && (
                     <select value={pago.cuenta_bancaria_id ?? ""} onChange={(e) => setPago((p) => ({ ...p, cuenta_bancaria_id: e.target.value || null }))} className={inputClass}>
-                      <option value="">POS / entidad…</option>
+                      <option value="">POS / banco…</option>
                       {cuentas.map((c) => <option key={c.id} value={c.id}>{c.nombre}{c.tipo ? ` (${c.tipo})` : ""}</option>)}
                     </select>
                   )}
-                  <input value={pago.entidad ?? ""} onChange={(e) => setPago((p) => ({ ...p, entidad: e.target.value }))} placeholder="POS / entidad (texto libre)" className={inputClass} />
                   <div className="grid grid-cols-2 gap-1">
                     {["debito", "credito"].map((t) => (
                       <button key={t} type="button" onClick={() => setPago((p) => ({ ...p, tipo_tarjeta: t }))}
@@ -363,8 +360,6 @@ export default function FacturarMesaPage({ params }: { params: Promise<{ sesionI
                       </button>
                     ))}
                   </div>
-                  <input value={pago.referencia ?? ""} onChange={(e) => setPago((p) => ({ ...p, referencia: e.target.value }))} placeholder="Voucher / N° autorización" className={inputClass} />
-                  <input value={pago.observacion ?? ""} onChange={(e) => setPago((p) => ({ ...p, observacion: e.target.value }))} placeholder="Observación (opcional)" className={inputClass} />
                 </div>
               )}
               {(metodo === "tarjeta" || metodo === "transferencia") && (

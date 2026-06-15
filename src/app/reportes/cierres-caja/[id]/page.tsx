@@ -63,7 +63,7 @@ export default function CajaDetallePage({ params }: { params: Promise<{ id: stri
           <Field label="Ingresos efvo." value={formatGs(resumen.ingresos_efectivo)} />
           <Field label="Egresos efvo." value={formatGs(resumen.egresos_efectivo)} />
           <Field label="Retiros efvo." value={formatGs(resumen.retiros_efectivo)} />
-          <Field label="Efectivo esperado" value={formatGs(c.monto_esperado_efectivo ?? resumen.efectivo_esperado)} accent />
+          <Field label="Debería haber en caja" value={formatGs(c.monto_esperado_efectivo ?? resumen.efectivo_esperado)} accent />
           <Field label="Efectivo contado" value={formatGs(c.monto_cierre_contado)} />
           <Field
             label="Diferencia"

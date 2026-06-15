@@ -105,7 +105,7 @@ export default function CajaControlPanel({
               <Stat label="Transferencia" value={formatGs(resumen.total_transferencia)} />
               <Stat label="Tarjeta" value={formatGs(resumen.total_tarjeta)} />
               <Stat
-                label="Efectivo esperado"
+                label="Debería haber en caja"
                 value={formatGs(resumen.efectivo_esperado)}
                 sub="apertura + efectivo ± mov."
                 accent
@@ -174,12 +174,12 @@ function Stat({ label, value, sub, accent }: { label: string; value: string; sub
 function ModalShell({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[120] flex items-start justify-center bg-slate-900/60 px-3 pt-12 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="flex max-h-[88vh] w-full max-w-md flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-slate-200 p-4">
           <h3 className="text-base font-semibold text-slate-800">{title}</h3>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700" title="Cerrar (Esc)">✕</button>
         </div>
-        <div className="p-4">{children}</div>
+        <div className="overflow-y-auto p-4">{children}</div>
       </div>
     </div>
   );
@@ -251,20 +251,44 @@ function CerrarCajaModal({
     onDone();
   }
 
+  const ajustes = resumen.ajustes_efectivo;
+
   return (
     <ModalShell title={`Cerrar caja N° ${caja.numero_caja}`} onClose={onClose}>
+      {/* 1 · Resumen de ventas del turno (transferencia/tarjeta cuentan al total, no al efectivo) */}
+      <SectionLabel>Resumen de ventas del turno</SectionLabel>
+      <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+        <Row label="Cantidad de ventas" value={String(resumen.cantidad_ventas)} />
+        <Row label="Ventas en efectivo" value={formatGs(resumen.total_efectivo)} />
+        <Row label="Ventas por transferencia" value={formatGs(resumen.total_transferencia)} />
+        <Row label="Ventas con tarjeta" value={formatGs(resumen.total_tarjeta)} />
+        <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-slate-900">
+          <span>Total vendido</span><span className="tabular-nums">{formatGs(resumen.total_vendido)}</span>
+        </div>
+      </div>
+      <p className="mt-1.5 text-[11px] leading-snug text-slate-400">
+        Transferencia y tarjeta suman al total vendido, pero <strong>no</strong> al efectivo que debería haber en caja.
+      </p>
+
+      {/* 2 · Arqueo de efectivo → Debería haber en caja (misma fórmula, no se modifica) */}
+      <SectionLabel className="mt-4">Arqueo de efectivo</SectionLabel>
       <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
         <Row label="Monto de apertura" value={formatGs(caja.monto_apertura)} />
-        <Row label="Ventas en efectivo" value={formatGs(resumen.total_efectivo)} />
-        <Row label="Ingresos efectivo" value={formatGs(resumen.ingresos_efectivo)} />
-        <Row label="Egresos efectivo" value={`− ${formatGs(resumen.egresos_efectivo)}`} />
-        <Row label="Retiros efectivo" value={`− ${formatGs(resumen.retiros_efectivo)}`} />
+        <Row label="Ventas en efectivo" value={`+ ${formatGs(resumen.total_efectivo)}`} />
+        <Row label="Ingresos manuales" value={`+ ${formatGs(resumen.ingresos_efectivo)}`} />
+        <Row label="Egresos manuales" value={`− ${formatGs(resumen.egresos_efectivo)}`} />
+        <Row label="Retiros de efectivo" value={`− ${formatGs(resumen.retiros_efectivo)}`} />
+        {ajustes !== 0 && (
+          <Row label="Ajustes de efectivo" value={`${ajustes > 0 ? "+" : "−"} ${formatGs(Math.abs(ajustes))}`} />
+        )}
         <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-slate-900">
-          <span>Efectivo esperado</span><span className="tabular-nums">{formatGs(esperado)}</span>
+          <span>Debería haber en caja</span><span className="tabular-nums">{formatGs(esperado)}</span>
         </div>
       </div>
 
-      <label className="mb-1.5 mt-3 block text-sm font-medium text-slate-700">Efectivo contado (Gs.)</label>
+      {/* 3 · Cierre */}
+      <SectionLabel className="mt-4">Cierre</SectionLabel>
+      <label className="mb-1.5 block text-sm font-medium text-slate-700">Efectivo contado (Gs.)</label>
       <MontoInput value={monto} onChange={(n) => setMonto(String(n))} placeholder="Ej: 400.000" className={inputClass} decimals={false} />
 
       {monto !== "" && (
@@ -296,6 +320,12 @@ function Row({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between text-slate-600">
       <span>{label}</span><span className="tabular-nums">{value}</span>
     </div>
+  );
+}
+
+function SectionLabel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <p className={`mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 ${className}`}>{children}</p>
   );
 }
 

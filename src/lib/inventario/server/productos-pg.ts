@@ -88,6 +88,7 @@ export interface ProductoRow {
   unidad_receta: string | null;
   factor_compra_receta: string | number;
   tiempo_prep_minutos: number;
+  sector_produccion: string;
 }
 
 export interface InsertProductoInput {
@@ -112,6 +113,7 @@ export interface InsertProductoInput {
   unidad_receta?: string | null;
   factor_compra_receta?: number;
   tiempo_prep_minutos?: number;
+  sector_produccion?: string;
 }
 
 const RETURNING = `
@@ -120,7 +122,8 @@ const RETURNING = `
   codigo_barras, codigo_barras_interno, imagen_path, imagen_url,
   categoria_principal_id, ubicacion_principal_id, proveedor_principal_id,
   es_vendible, es_insumo,
-  controla_stock, valorizado, unidad_compra, unidad_receta, factor_compra_receta, tiempo_prep_minutos
+  controla_stock, valorizado, unidad_compra, unidad_receta, factor_compra_receta, tiempo_prep_minutos,
+  sector_produccion
 `;
 
 // ─── Operaciones ──────────────────────────────────────────────────────────
@@ -138,14 +141,16 @@ export async function insertProducto(
       unidad_medida, metodo_valuacion, codigo_barras, codigo_barras_interno,
       categoria_principal_id, ubicacion_principal_id, proveedor_principal_id,
       es_vendible, es_insumo,
-      controla_stock, valorizado, unidad_compra, unidad_receta, factor_compra_receta, tiempo_prep_minutos
+      controla_stock, valorizado, unidad_compra, unidad_receta, factor_compra_receta, tiempo_prep_minutos,
+      sector_produccion
     ) VALUES (
       $1::uuid, $2, $3, $4::numeric, $5::numeric, $6::numeric, $7::numeric,
       $8, $9, $10, COALESCE($11::boolean, false),
       $12::uuid, $13::uuid, $14::uuid,
       COALESCE($15::boolean, true), COALESCE($16::boolean, false),
       COALESCE($17::boolean, true), COALESCE($18::boolean, true),
-      $19, $20, COALESCE($21::numeric, 1), COALESCE($22::int, 0)
+      $19, $20, COALESCE($21::numeric, 1), COALESCE($22::int, 0),
+      COALESCE($23, 'ninguno')
     )
     RETURNING ${RETURNING}
   `;
@@ -172,6 +177,7 @@ export async function insertProducto(
     d.unidad_receta ?? null,
     d.factor_compra_receta ?? null,
     d.tiempo_prep_minutos ?? null,
+    d.sector_produccion ?? null,
   ];
   try {
     const { rows } = await pool().query<ProductoRow>(sql, params);
@@ -205,6 +211,7 @@ export interface UpdateProductoInput {
   unidad_receta?: string | null;
   factor_compra_receta?: number;
   tiempo_prep_minutos?: number;
+  sector_produccion?: string;
 }
 
 /** Update parcial. Devuelve la fila o null si no existe / no pertenece a la empresa. */
@@ -255,6 +262,7 @@ export async function updateProductoPg(
   if (patch.unidad_receta !== undefined) add("unidad_receta", patch.unidad_receta || null);
   if (patch.factor_compra_receta !== undefined) add("factor_compra_receta", patch.factor_compra_receta, "::numeric");
   if (patch.tiempo_prep_minutos !== undefined) add("tiempo_prep_minutos", patch.tiempo_prep_minutos, "::int");
+  if (patch.sector_produccion !== undefined) add("sector_produccion", patch.sector_produccion || "ninguno");
   if (sets.length === 0) return await getProductoPg(schemaRaw, empresaId, id);
 
   sets.push(`updated_at = now()`);
@@ -308,6 +316,7 @@ export interface SearchHitRow {
   proveedor_nombre: string | null;
   ubicacion_nombre: string | null;
   ubicacion_tipo: string | null;
+  sector_produccion: string;
 }
 
 /**
@@ -356,6 +365,7 @@ export async function searchProductosPg(
     SELECT p.id, p.nombre, p.sku, p.codigo_barras, p.codigo_barras_interno,
            p.precio_venta, p.costo_promedio, p.stock_actual, p.stock_minimo,
            p.unidad_medida, p.metodo_valuacion, p.imagen_path, p.imagen_url,
+           p.sector_produccion,
            c.nombre  AS categoria_nombre,
            pr.nombre AS proveedor_nombre,
            u.nombre  AS ubicacion_nombre,
@@ -462,5 +472,6 @@ export function rowToProductoApi(r: ProductoRow): Record<string, unknown> {
     unidad_receta: r.unidad_receta ?? null,
     factor_compra_receta: Number(r.factor_compra_receta ?? 1),
     tiempo_prep_minutos: Number(r.tiempo_prep_minutos ?? 0),
+    sector_produccion: r.sector_produccion ?? "ninguno",
   };
 }

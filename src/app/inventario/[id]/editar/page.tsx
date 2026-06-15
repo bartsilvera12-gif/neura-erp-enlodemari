@@ -65,6 +65,7 @@ export default function EditarProductoPage() {
   // Clasificación gastronómica
   const [esVendible, setEsVendible] = useState(true);
   const [esInsumo, setEsInsumo] = useState(false);
+  const [sectorProduccion, setSectorProduccion] = useState<"ninguno" | "pizzeria" | "plancha">("ninguno");
 
   // Tipo gastro inferido a partir de los flags (para UX simplificada)
   type TipoGastro = "reventa" | "menu" | "materia";
@@ -160,6 +161,7 @@ export default function EditarProductoPage() {
       const ctrlStock = p.controla_stock ?? true;
       setEsVendible(esVend);
       setEsInsumo(esIns);
+      setSectorProduccion((p.sector_produccion as "ninguno" | "pizzeria" | "plancha") ?? "ninguno");
       setControlaStock(ctrlStock);
       setDescripcion(p.descripcion ?? "");
       setValorizado(p.valorizado ?? true);
@@ -290,6 +292,7 @@ export default function EditarProductoPage() {
         proveedor_principal_id: proveedorId,
         es_vendible: esVendible,
         es_insumo: esInsumo,
+        sector_produccion: sectorProduccion,
         controla_stock: controlaStock,
         valorizado: valorizado,
         unidad_compra: unidadCompra.trim() || null,
@@ -524,6 +527,22 @@ export default function EditarProductoPage() {
                     + Crear
                   </Link>
                 </div>
+              </div>
+              {/* Sector de producción — decide qué comanda imprime el pedido. */}
+              <div className="md:col-span-4 min-w-0">
+                <label className={labelClass}>Sector de producción</label>
+                <select
+                  value={sectorProduccion}
+                  onChange={(e) => setSectorProduccion(e.target.value as "ninguno" | "pizzeria" | "plancha")}
+                  className={inputClass}
+                >
+                  <option value="ninguno">Ninguno (no genera comanda)</option>
+                  <option value="pizzeria">Pizzería (copia completa)</option>
+                  <option value="plancha">Plancha</option>
+                </select>
+                <p className="mt-2 text-xs text-gray-400">
+                  Pizzería recibe copia completa; plancha solo sus productos; ninguno (bebidas) no imprime comanda.
+                </p>
               </div>
               <div className={`md:col-span-4 min-w-0 ${tipoGastro === "menu" ? "hidden" : ""}`}>
                 <label className={labelClass}>Proveedor principal</label>

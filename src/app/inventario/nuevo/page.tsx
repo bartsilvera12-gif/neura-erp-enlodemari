@@ -54,6 +54,9 @@ export default function NuevoProductoPage() {
   const [esVendible, setEsVendible] = useState(true);
   const [esInsumo, setEsInsumo] = useState(false);
 
+  // Sector de producción (impresión de comandas): ninguno | pizzeria | plancha.
+  const [sectorProduccion, setSectorProduccion] = useState<"ninguno" | "pizzeria" | "plancha">("ninguno");
+
   // Selector inicial de tipo gastronómico — aplica presets a los flags
   type TipoGastro = "reventa" | "menu" | "materia" | null;
   const [tipoGastro, setTipoGastro] = useState<TipoGastro>(null);
@@ -318,6 +321,7 @@ export default function NuevoProductoPage() {
           proveedor_principal_id: proveedorId,
           es_vendible: esVendible,
           es_insumo: esInsumo,
+          sector_produccion: sectorProduccion,
           controla_stock: controlaStock,
           valorizado: valorizado,
           unidad_compra: unidadCompra.trim() || null,
@@ -779,6 +783,23 @@ export default function NuevoProductoPage() {
                     + Crear
                   </Link>
                 </div>
+              </div>
+
+              {/* Sector de producción — 4 cols. Decide qué comanda imprime el pedido. */}
+              <div className="md:col-span-4 min-w-0">
+                <label className={labelClass}>Sector de producción</label>
+                <select
+                  value={sectorProduccion}
+                  onChange={(e) => setSectorProduccion(e.target.value as "ninguno" | "pizzeria" | "plancha")}
+                  className={inputClass}
+                >
+                  <option value="ninguno">Ninguno (no genera comanda)</option>
+                  <option value="pizzeria">Pizzería (copia completa)</option>
+                  <option value="plancha">Plancha</option>
+                </select>
+                <p className="mt-2 text-xs text-gray-400">
+                  Pizzería recibe copia completa del pedido; plancha solo sus productos; ninguno (bebidas) no imprime comanda.
+                </p>
               </div>
 
               {/* Proveedor — 4 cols. Oculto para Menú (productos preparados no tienen proveedor). */}

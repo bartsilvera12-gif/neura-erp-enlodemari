@@ -23,6 +23,7 @@ interface ProductoMesa {
   /** Solo si controla_stock (reventa). Para menú/elaborado es null. */
   stock_actual: number | null;
   tipo_visual: "reventa" | "menu";
+  sector_produccion: string;
 }
 
 /**
@@ -49,7 +50,7 @@ export async function GET(request: NextRequest) {
 
     let q = sb
       .from("productos")
-      .select("id, nombre, sku, precio_venta, stock_actual, controla_stock, imagen_path, imagen_url, categoria_principal_id")
+      .select("id, nombre, sku, precio_venta, stock_actual, controla_stock, imagen_path, imagen_url, categoria_principal_id, sector_produccion")
       .eq("empresa_id", auth.empresa_id)
       .eq("activo", true)
       .eq("es_vendible", true)
@@ -103,6 +104,7 @@ export async function GET(request: NextRequest) {
         controla_stock: ctrl,
         stock_actual: ctrl ? Number(r.stock_actual ?? 0) : null,
         tipo_visual: ctrl ? "reventa" : "menu",
+        sector_produccion: String(r.sector_produccion ?? "ninguno"),
       };
     });
 

@@ -164,33 +164,35 @@ function renderCopia(opts: {
   showTotalCocina?: boolean;
 }): string {
   const { tipo, venta, items, brief, fontPx, isLast } = opts;
-  const showPrices = tipo === "cliente";
-  const showTotalCocina = opts.showTotalCocina === true && tipo !== "cliente";
+  // Cliente y COPIA PIZZERÍA llevan precios (la pizzería es copia completa, "igualita").
+  // Plancha y cocina son comandas de producción sin precios.
+  const showPrices = tipo === "cliente" || tipo === "pizzeria";
+  const showTotalCocina = opts.showTotalCocina === true && !showPrices;
   const sectorBadge =
-    tipo === "pizzeria" ? "COMANDA PIZZERÍA"
+    tipo === "pizzeria" ? "COPIA PIZZERÍA"
     : tipo === "plancha" ? "COMANDA PLANCHA"
     : tipo === "cocina" ? "COMANDA COCINA"
     : "";
   const modalidad = modalidadLabel(brief?.modalidad);
 
-  // Filas de ítems: en cliente todas; en cocina todas también, pero las del propio sector destacadas.
-  const itemsHtml = items
+  // Qué ítems entran en esta copia:
+  //  · plancha → SOLO los ítems de plancha (sin bebidas ni pizzería).
+  //  · cliente / pizzería / cocina → el pedido COMPLETO.
+  const itemsCopia = tipo === "plancha" ? items.filter((it) => it.sector === "plancha") : items;
+
+  const itemsHtml = itemsCopia
     .map((it) => {
       const cant = Number(it.cantidad);
       const punit = Number(it.precio_venta);
       const sub = Number(it.total_linea);
-      const matchesSector =
-        (tipo === "pizzeria" && it.sector === "pizzeria") ||
-        (tipo === "plancha" && it.sector === "plancha");
-      const cls = matchesSector ? "match" : tipo === "cliente" || tipo === "cocina" ? "" : "muted";
       const main = showPrices
-        ? `<tr class="${cls}">
+        ? `<tr>
              <td class="qty"><strong>${cant}×</strong></td>
              <td class="name">${escapeHtml(it.producto_nombre)}</td>
              <td class="amt">${formatGs(sub)}</td>
            </tr>
            <tr class="sub"><td></td><td colspan="2">${cant} × ${formatGs(punit)}</td></tr>`
-        : `<tr class="${cls}">
+        : `<tr>
              <td class="qty"><strong>${cant}×</strong></td>
              <td class="name" colspan="2"><strong>${escapeHtml(it.producto_nombre)}</strong></td>
            </tr>`;
@@ -366,9 +368,28 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
     }
   }
 
+  // Sector PRIMARIO: productos.sector_produccion (configurable desde la UI).
+  // Fallback: categoría (sectorByProd) y luego SKU. Así un producto reconfigurado
+  // manualmente manda sobre la convención de categoría/SKU.
+  const sectorProdMap = new Map<string, Sector>();
+  if (productoIds.length > 0) {
+    try {
+      const spQ = await ctx.supabase
+        .from("productos")
+        .select("id, sector_produccion")
+        .eq("empresa_id", empresaId)
+        .in("id", productoIds);
+      for (const r of (spQ.data ?? []) as Array<{ id: string; sector_produccion: string | null }>) {
+        const s = r.sector_produccion;
+        sectorProdMap.set(r.id, s === "pizzeria" || s === "plancha" ? s : null);
+      }
+    } catch { /* fallback a categoría/SKU */ }
+  }
+
   const items: EnrichedItem[] = itemsRaw.map((it) => {
+    const fromConfig = sectorProdMap.get(it.producto_id) ?? null;
     const fromCat = sectorByProd.get(it.producto_id) ?? null;
-    const sector: Sector = fromCat ?? classifyBySku(it.sku);
+    const sector: Sector = fromConfig ?? fromCat ?? classifyBySku(it.sku);
     return { ...it, sector };
   });
 

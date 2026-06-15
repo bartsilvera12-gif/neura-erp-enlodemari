@@ -23,6 +23,8 @@ export interface ProductoPickerItem {
   ubicacion_tipo: string | null;
   /** Si false → producto preparado (Menú): no valida stock ni muestra "Sin stock". */
   controla_stock?: boolean;
+  /** Sector de producción para impresión: ninguno | pizzeria | plancha. */
+  sector_produccion?: string;
 }
 
 /**

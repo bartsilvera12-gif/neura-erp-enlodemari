@@ -37,7 +37,11 @@ export interface Producto {
   tiempo_prep_minutos?: number;
   /** Descripción detallada (visible en Menú y edición). */
   descripcion?: string | null;
+  /** Sector de producción para impresión de comandas: ninguno | pizzeria | plancha. */
+  sector_produccion?: SectorProduccion;
 }
+
+export type SectorProduccion = "ninguno" | "pizzeria" | "plancha";
 
 export interface MovimientoInventario {
   id: string;

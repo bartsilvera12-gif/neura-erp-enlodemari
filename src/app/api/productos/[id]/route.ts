@@ -11,7 +11,9 @@ const PRODUCTO_COLS =
   "codigo_barras, codigo_barras_interno, imagen_path, imagen_url, " +
   "categoria_principal_id, ubicacion_principal_id, proveedor_principal_id, " +
   "es_vendible, es_insumo, controla_stock, valorizado, unidad_compra, unidad_receta, " +
-  "factor_compra_receta, tiempo_prep_minutos, descripcion";
+  "factor_compra_receta, tiempo_prep_minutos, descripcion, sector_produccion";
+
+const SECTORES_PRODUCCION = new Set(["ninguno", "pizzeria", "plancha"]);
 
 function toNumber(v: unknown): unknown {
   return typeof v === "string" ? Number(v) : v;
@@ -146,6 +148,10 @@ export async function PATCH(
       patch.tiempo_prep_minutos = Math.floor(body.tiempo_prep_minutos);
     if (body.descripcion !== undefined)
       patch.descripcion = body.descripcion == null ? null : String(body.descripcion).trim() || null;
+    if (typeof body.sector_produccion === "string") {
+      const s = body.sector_produccion.trim().toLowerCase();
+      if (SECTORES_PRODUCCION.has(s)) patch.sector_produccion = s;
+    }
 
     if (Object.keys(patch).length === 0) {
       const { data: existing, error: errGet } = await sb

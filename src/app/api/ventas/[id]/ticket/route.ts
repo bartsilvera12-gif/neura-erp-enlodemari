@@ -472,8 +472,9 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
 <title>Ticket ${escapeHtml(venta.numero_control)} — ${NEGOCIO}</title>
 <style>
   :root { color-scheme: light; }
-  * { box-sizing: border-box; }
-  body { font-family: ui-monospace, "Courier New", monospace; font-size: ${fontPx}px; color: #000; background: #f1f1f1; margin: 0; padding: 20px; }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  /* Térmica: todo negro puro y en negrita para que no salga borroso. */
+  body { font-family: ui-monospace, "Courier New", monospace; font-size: ${fontPx}px; color: #000; font-weight: 700; background: #f1f1f1; margin: 0; padding: 20px; }
   .paper { background: #fff; width: ${widthMm}mm; margin: 0 auto 12mm; padding: 6mm 4mm; box-shadow: 0 1px 4px rgba(0,0,0,0.1); page-break-after: always; break-after: page; }
   .paper.last { page-break-after: auto; break-after: auto; margin-bottom: 0; }
   h1 { font-size: ${fontPx + 4}px; text-align: center; margin: 0 0 2mm; letter-spacing: 1px; }
@@ -485,22 +486,22 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
   td { vertical-align: top; padding: 0.5mm 0; }
   td.qty { width: 9mm; }
   td.amt { width: 22mm; text-align: right; white-space: nowrap; }
-  tr.sub td { color: #555; font-size: ${fontPx - 2}px; padding-bottom: 1mm; }
-  tr.muted td { color: #777; font-style: italic; }
+  tr.sub td { color: #000; font-size: ${fontPx - 1}px; font-weight: 700; padding-bottom: 1mm; }
+  tr.muted td { color: #000; font-style: italic; }
   tr.match td { background: #fffbcc; }
   .totales td { padding: 0.7mm 0; }
   .totales .lbl { text-align: left; }
   .totales .val { text-align: right; white-space: nowrap; }
   .total-row { font-weight: bold; font-size: ${fontPx + 2}px; border-top: 1px solid #000; }
   .obs { font-size: ${fontPx - 1}px; margin: 2mm 0; }
-  .footer { font-size: ${fontPx - 2}px; text-align: center; margin-top: 3mm; font-style: italic; }
-  .footer-cocina { font-size: ${fontPx - 2}px; text-align: center; margin-top: 3mm; font-weight: bold; }
+  .footer { font-size: ${fontPx - 1}px; text-align: center; margin-top: 3mm; font-style: italic; color: #000; }
+  .footer-cocina { font-size: ${fontPx - 1}px; text-align: center; margin-top: 3mm; font-weight: 800; color: #000; }
   .actions { max-width: ${widthMm}mm; margin: 8mm auto 0; text-align: center; }
   .actions button { padding: 8px 16px; font-size: 13px; cursor: pointer; border: 1px solid #333; background: #fff; border-radius: 6px; }
   .actions button:hover { background: #f5f5f5; }
   .actions a { margin-left: 12px; font-size: 13px; color: #444; }
   @media print {
-    body { background: #fff; padding: 0; }
+    body { background: #fff; padding: 0; color: #000; font-weight: 700; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .paper { width: ${widthMm}mm; box-shadow: none; padding: 2mm; margin: 0; }
     .actions { display: none; }
     @page { margin: 0; size: ${widthMm}mm auto; }

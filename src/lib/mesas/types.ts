@@ -9,6 +9,8 @@
 
 export type EstadoMesa = "libre" | "ocupada" | "por_cobrar" | "cerrada" | "inactiva";
 export type EstadoSesion = "abierta" | "por_cobrar" | "facturada" | "cancelada";
+/** Modalidad del pedido. 'mesa' consume mesa_id; 'para_llevar' no ocupa mesa. */
+export type TipoSesion = "mesa" | "para_llevar";
 /**
  * Estado de un ítem de cuenta:
  *  - pendiente: agregado por el mozo, aún no enviado a cocina (editable/cancelable).
@@ -27,7 +29,13 @@ export interface Mesa {
 
 export interface MesaSesion {
   id: string;
-  mesa_id: string;
+  /** null cuando tipo === 'para_llevar'. */
+  mesa_id: string | null;
+  tipo: TipoSesion;
+  /** Solo para tipo='para_llevar'. Correlativo por empresa, arranca en 1, no resetea. */
+  numero_pl: number | null;
+  /** Nombre opcional del cliente (identifica al mostrador). */
+  nombre_cliente: string | null;
   estado: EstadoSesion;
   mozo_id: string | null;
   abierta_at: string;
@@ -35,6 +43,14 @@ export interface MesaSesion {
   cerrada_at: string | null;
   venta_id: string | null;
   observacion: string | null;
+}
+
+/** Resumen de una sesión PARA LLEVAR para la lista/sidebar. */
+export interface ParaLlevarConResumen {
+  sesion: MesaSesion;
+  total: number;
+  items_count: number;
+  mozo_nombre: string | null;
 }
 
 export interface MesaSesionItem {

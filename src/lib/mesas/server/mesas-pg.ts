@@ -14,6 +14,7 @@ import type {
   MesaDetalle,
   MesaSesion,
   MesaSesionItem,
+  ParaLlevarConResumen,
 } from "@/lib/mesas/types";
 
 type Sb = ReturnType<typeof createServiceRoleClientWithDbSchema>;
@@ -25,7 +26,7 @@ function num(v: unknown): number {
 
 const MESA_COLS = "id, numero, nombre, estado, activo";
 const SESION_COLS =
-  "id, mesa_id, estado, mozo_id, abierta_at, enviada_caja_at, cerrada_at, venta_id, observacion";
+  "id, mesa_id, tipo, numero_pl, nombre_cliente, estado, mozo_id, abierta_at, enviada_caja_at, cerrada_at, venta_id, observacion";
 const ITEM_COLS =
   "id, sesion_id, producto_id, producto_nombre, sku, cantidad, precio_unitario, total, observacion, estado, comanda_id, enviado_at, es_mitad_mitad, mitad_1_nombre, mitad_2_nombre, item_display_name";
 
@@ -44,7 +45,10 @@ function mapMesa(r: Record<string, unknown>): Mesa {
 function mapSesion(r: Record<string, unknown>): MesaSesion {
   return {
     id: String(r.id),
-    mesa_id: String(r.mesa_id),
+    mesa_id: r.mesa_id == null ? null : String(r.mesa_id),
+    tipo: (r.tipo as MesaSesion["tipo"]) ?? "mesa",
+    numero_pl: r.numero_pl == null ? null : Number(r.numero_pl),
+    nombre_cliente: (r.nombre_cliente as string) ?? null,
     estado: r.estado as MesaSesion["estado"],
     mozo_id: (r.mozo_id as string) ?? null,
     abierta_at: r.abierta_at as string,
@@ -125,10 +129,11 @@ export async function listarMesasPg(schema: string, empresaId: string): Promise<
     .from("mesa_sesiones")
     .select(SESION_COLS)
     .eq("empresa_id", empresaId)
+    .eq("tipo", "mesa")
     .in("estado", ["abierta", "por_cobrar"]);
   if (sQ.error) throw new Error(sQ.error.message);
   const sesiones = (sQ.data ?? []).map((r) => mapSesion(r as Record<string, unknown>));
-  const sesionByMesa = new Map(sesiones.map((s) => [s.mesa_id, s]));
+  const sesionByMesa = new Map(sesiones.filter((s) => s.mesa_id).map((s) => [s.mesa_id as string, s]));
 
   const { totalBy, countBy } = await totalesPorSesion(sb, empresaId, sesiones.map((s) => s.id));
   const mozoNombres = await resolveMozoNombres(sb, sesiones.map((s) => s.mozo_id ?? "").filter(Boolean));
@@ -190,13 +195,14 @@ export async function listarPorCobrarPg(schema: string, empresaId: string): Prom
     .from("mesa_sesiones")
     .select(SESION_COLS)
     .eq("empresa_id", empresaId)
+    .eq("tipo", "mesa")
     .eq("estado", "por_cobrar")
     .order("enviada_caja_at", { ascending: true });
   if (sQ.error) throw new Error(sQ.error.message);
   const sesiones = (sQ.data ?? []).map((r) => mapSesion(r as Record<string, unknown>));
   if (!sesiones.length) return [];
 
-  const mesaIds = [...new Set(sesiones.map((s) => s.mesa_id))];
+  const mesaIds = [...new Set(sesiones.map((s) => s.mesa_id).filter((id): id is string => !!id))];
   const mQ = await sb.from("mesas").select(MESA_COLS).eq("empresa_id", empresaId).in("id", mesaIds);
   if (mQ.error) throw new Error(mQ.error.message);
   const mesaById = new Map(((mQ.data ?? []).map((r) => mapMesa(r as Record<string, unknown>))).map((m) => [m.id, m]));
@@ -205,12 +211,109 @@ export async function listarPorCobrarPg(schema: string, empresaId: string): Prom
   const mozoNombres = await resolveMozoNombres(sb, sesiones.map((s) => s.mozo_id ?? "").filter(Boolean));
 
   return sesiones.map((sesion) => ({
-    mesa: mesaById.get(sesion.mesa_id) ?? { id: sesion.mesa_id, numero: 0, nombre: null, estado: "por_cobrar", activo: true },
+    mesa: (sesion.mesa_id && mesaById.get(sesion.mesa_id)) ?? { id: sesion.mesa_id ?? "", numero: 0, nombre: null, estado: "por_cobrar", activo: true },
     sesion,
     total: totalBy.get(sesion.id) ?? 0,
     items_count: countBy.get(sesion.id) ?? 0,
     mozo_nombre: sesion.mozo_id ? mozoNombres.get(sesion.mozo_id) ?? null : null,
   }));
+}
+
+// ── PARA LLEVAR ───────────────────────────────────────────────────────────────
+
+/** Crea una sesión "Para llevar" (sin mesa) con correlativo PL autogenerado. */
+export async function abrirSesionParaLlevarPg(
+  schema: string,
+  empresaId: string,
+  mozoId: string | null,
+  nombreCliente: string | null
+): Promise<MesaSesion> {
+  const sb = createServiceRoleClientWithDbSchema(schema);
+
+  // Correlativo atómico (arranca en 1, nunca resetea).
+  const rpc = await sb.rpc("next_para_llevar_numero", { p_empresa_id: empresaId });
+  if (rpc.error) throw new Error(rpc.error.message);
+  const numeroPl = Number(rpc.data);
+  if (!Number.isFinite(numeroPl) || numeroPl < 1) {
+    throw new Error("No se pudo obtener el correlativo Para llevar.");
+  }
+
+  const nombre = (nombreCliente ?? "").trim() || null;
+
+  const ins = await sb
+    .from("mesa_sesiones")
+    .insert({
+      empresa_id: empresaId,
+      mesa_id: null,
+      tipo: "para_llevar",
+      numero_pl: numeroPl,
+      nombre_cliente: nombre,
+      estado: "abierta",
+      mozo_id: mozoId,
+    })
+    .select(SESION_COLS)
+    .single();
+  if (ins.error) throw new Error(ins.error.message);
+  return mapSesion(ins.data as Record<string, unknown>);
+}
+
+/** Lista sesiones PARA LLEVAR vivas (abierta/por_cobrar) con resumen para el sidebar. */
+export async function listarParaLlevarPg(
+  schema: string,
+  empresaId: string
+): Promise<ParaLlevarConResumen[]> {
+  const sb = createServiceRoleClientWithDbSchema(schema);
+  const sQ = await sb
+    .from("mesa_sesiones")
+    .select(SESION_COLS)
+    .eq("empresa_id", empresaId)
+    .eq("tipo", "para_llevar")
+    .in("estado", ["abierta", "por_cobrar"])
+    .order("abierta_at", { ascending: true });
+  if (sQ.error) throw new Error(sQ.error.message);
+  const sesiones = (sQ.data ?? []).map((r) => mapSesion(r as Record<string, unknown>));
+  if (!sesiones.length) return [];
+
+  const { totalBy, countBy } = await totalesPorSesion(sb, empresaId, sesiones.map((s) => s.id));
+  const mozoNombres = await resolveMozoNombres(sb, sesiones.map((s) => s.mozo_id ?? "").filter(Boolean));
+
+  return sesiones.map((sesion) => ({
+    sesion,
+    total: totalBy.get(sesion.id) ?? 0,
+    items_count: countBy.get(sesion.id) ?? 0,
+    mozo_nombre: sesion.mozo_id ? mozoNombres.get(sesion.mozo_id) ?? null : null,
+  }));
+}
+
+/** Detalle completo de una sesión PL por su sesion_id (ítems activos). */
+export async function getParaLlevarDetallePg(
+  schema: string,
+  empresaId: string,
+  sesionId: string
+): Promise<{ sesion: MesaSesion; items: MesaSesionItem[]; total: number } | null> {
+  const sb = createServiceRoleClientWithDbSchema(schema);
+  const sQ = await sb
+    .from("mesa_sesiones")
+    .select(SESION_COLS)
+    .eq("empresa_id", empresaId)
+    .eq("id", sesionId)
+    .eq("tipo", "para_llevar")
+    .maybeSingle();
+  if (sQ.error) throw new Error(sQ.error.message);
+  if (!sQ.data) return null;
+  const sesion = mapSesion(sQ.data as Record<string, unknown>);
+
+  const iQ = await sb
+    .from("mesa_sesion_items")
+    .select(ITEM_COLS)
+    .eq("empresa_id", empresaId)
+    .eq("sesion_id", sesion.id)
+    .in("estado", ITEM_VIGENTES)
+    .order("created_at", { ascending: true });
+  if (iQ.error) throw new Error(iQ.error.message);
+  const items = (iQ.data ?? []).map((r) => mapItem(r as Record<string, unknown>));
+  const total = items.reduce((s, it) => s + it.total, 0);
+  return { sesion, items, total };
 }
 
 // ── Escrituras ────────────────────────────────────────────────────────────────

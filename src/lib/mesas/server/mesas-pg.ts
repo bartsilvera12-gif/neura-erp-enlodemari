@@ -842,8 +842,12 @@ export async function getSesionDetallePg(schema: string, empresaId: string, sesi
   if (sQ.error) throw new Error(sQ.error.message);
   if (!sQ.data) return null;
   const sesion = mapSesion(sQ.data as Record<string, unknown>);
-  const mQ = await sb.from("mesas").select(MESA_COLS).eq("empresa_id", empresaId).eq("id", sesion.mesa_id).maybeSingle();
-  const mesa = mQ.data ? mapMesa(mQ.data as Record<string, unknown>) : { id: sesion.mesa_id, numero: 0, nombre: null, estado: "por_cobrar" as const, activo: true };
+  const mQ = sesion.mesa_id
+    ? await sb.from("mesas").select(MESA_COLS).eq("empresa_id", empresaId).eq("id", sesion.mesa_id).maybeSingle()
+    : { data: null };
+  const mesa: Mesa = mQ.data
+    ? mapMesa(mQ.data as Record<string, unknown>)
+    : { id: sesion.mesa_id ?? "", numero: 0, nombre: null, estado: "por_cobrar", activo: true };
   const iQ = await sb.from("mesa_sesion_items").select(ITEM_COLS)
     .eq("empresa_id", empresaId).eq("sesion_id", sesionId).in("estado", ITEM_VIGENTES).order("created_at", { ascending: true });
   if (iQ.error) throw new Error(iQ.error.message);

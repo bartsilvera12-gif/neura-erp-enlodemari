@@ -79,13 +79,19 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ id: str
     : "";
   const footer = conPrecios ? "Copia pizzería — uso interno" : "Comanda interna — no es comprobante";
 
+  const esParaLlevar = c.sesion_tipo === "para_llevar";
+  const numeroPl = c.numero_pl != null ? `PL-${String(c.numero_pl).padStart(3, "0")}` : "PL";
+  const encabezadoPedido = esParaLlevar
+    ? `<div><strong>PARA LLEVAR · ${escapeHtml(numeroPl)}</strong></div>${c.nombre_cliente ? `<div>Cliente: ${escapeHtml(c.nombre_cliente)}</div>` : ""}`
+    : `<div><strong>Mesa ${c.mesa_numero ?? "—"}</strong></div>`;
+
   const section = `<section class="paper last">
     <div class="sector-banner">${banner}</div>
     <h1>${NEGOCIO}</h1>
     <div class="meta">${metaSector} · ${formatFecha(c.created_at)}</div>
     <hr>
     <div class="pedido">
-      <div><strong>Mesa ${c.mesa_numero ?? "—"}</strong></div>
+      ${encabezadoPedido}
       <div>Mozo: ${escapeHtml(c.mozo_nombre ?? "—")}</div>
     </div>
     <hr>

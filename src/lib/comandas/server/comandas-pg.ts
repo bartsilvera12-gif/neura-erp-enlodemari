@@ -44,13 +44,27 @@ async function armarCards(sb: Sb, empresaId: string, comandas: ComandaRow[]): Pr
   const comandaIds = comandas.map((c) => c.id);
   const sesionIds = [...new Set(comandas.map((c) => c.sesion_id))];
 
-  const sQ = await sb.from("mesa_sesiones").select("id, mesa_id, mozo_id").eq("empresa_id", empresaId).in("id", sesionIds);
-  const sesById = new Map<string, { mesa_id: string; mozo_id: string | null }>();
-  for (const s of (sQ.data ?? []) as Array<{ id: string; mesa_id: string; mozo_id: string | null }>) {
-    sesById.set(s.id, { mesa_id: s.mesa_id, mozo_id: s.mozo_id });
+  const sQ = await sb.from("mesa_sesiones")
+    .select("id, mesa_id, mozo_id, tipo, numero_pl, nombre_cliente")
+    .eq("empresa_id", empresaId).in("id", sesionIds);
+  const sesById = new Map<string, {
+    mesa_id: string | null; mozo_id: string | null;
+    tipo: "mesa" | "para_llevar"; numero_pl: number | null; nombre_cliente: string | null;
+  }>();
+  for (const s of (sQ.data ?? []) as Array<{
+    id: string; mesa_id: string | null; mozo_id: string | null;
+    tipo: string | null; numero_pl: number | string | null; nombre_cliente: string | null;
+  }>) {
+    sesById.set(s.id, {
+      mesa_id: s.mesa_id,
+      mozo_id: s.mozo_id,
+      tipo: s.tipo === "para_llevar" ? "para_llevar" : "mesa",
+      numero_pl: s.numero_pl == null ? null : Number(s.numero_pl),
+      nombre_cliente: s.nombre_cliente,
+    });
   }
 
-  const mesaIds = [...new Set([...sesById.values()].map((s) => s.mesa_id))];
+  const mesaIds = [...new Set([...sesById.values()].map((s) => s.mesa_id).filter((id): id is string => !!id))];
   const mesaNum = new Map<string, number>();
   if (mesaIds.length) {
     const mQ = await sb.from("mesas").select("id, numero").eq("empresa_id", empresaId).in("id", mesaIds);
@@ -135,7 +149,10 @@ async function armarCards(sb: Sb, empresaId: string, comandas: ComandaRow[]): Pr
       numero: num(c.numero),
       estado: c.estado as EstadoComanda,
       created_at: c.created_at,
-      mesa_numero: ses ? mesaNum.get(ses.mesa_id) ?? null : null,
+      mesa_numero: ses && ses.mesa_id ? mesaNum.get(ses.mesa_id) ?? null : null,
+      sesion_tipo: ses?.tipo ?? "mesa",
+      numero_pl: ses?.numero_pl ?? null,
+      nombre_cliente: ses?.nombre_cliente ?? null,
       mozo_nombre: c.creado_por ? userNombre.get(c.creado_por) ?? null : null,
       total,
       items,

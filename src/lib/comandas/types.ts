@@ -35,6 +35,12 @@ export interface ComandaCard {
   estado: EstadoComanda;
   created_at: string;
   mesa_numero: number | null;
+  /** Modalidad de la sesión ('mesa' por defecto). */
+  sesion_tipo?: "mesa" | "para_llevar";
+  /** Correlativo Para llevar (solo cuando sesion_tipo='para_llevar'). */
+  numero_pl?: number | null;
+  /** Nombre opcional del cliente (solo cuando sesion_tipo='para_llevar'). */
+  nombre_cliente?: string | null;
   mozo_nombre: string | null;
   /** Suma de ítems vigentes (uso interno; el ticket de cocina NO muestra precio). */
   total: number;

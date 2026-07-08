@@ -1,5 +1,8 @@
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
-import type { ComandaEnvioResult, MesaConResumen, MesaDetalle, MesaSesionItem } from "./types";
+import type {
+  ComandaEnvioResult, MesaConResumen, MesaDetalle, MesaSesion, MesaSesionItem,
+  ParaLlevarConResumen,
+} from "./types";
 
 type Ok<T> = { success: true } & T;
 type Err = { success: false; error: string };
@@ -85,4 +88,40 @@ export function facturarMesa(
     "POST",
     { metodo_pago: metodoPago, pago: pago ?? null }
   );
+}
+
+// ── PARA LLEVAR ───────────────────────────────────────────────────────────────
+
+/** Crea una nueva sesión "Para llevar" (opcional: nombre del cliente). */
+export function crearParaLlevar(nombreCliente: string | null) {
+  return call<{ sesion: MesaSesion }>("/api/mesas/para-llevar", "POST", { nombre_cliente: nombreCliente });
+}
+
+/** Lista sesiones PL activas (abierta/por_cobrar) para el listado en /mesas. */
+export async function getParaLlevarActivas(): Promise<ParaLlevarConResumen[]> {
+  const r = await call<{ items: ParaLlevarConResumen[] }>("/api/mesas/para-llevar", "GET");
+  return r.success ? r.items : [];
+}
+
+/** Detalle de una sesión PL. */
+export async function getParaLlevarDetalle(sesionId: string): Promise<{ sesion: MesaSesion; items: MesaSesionItem[]; total: number } | null> {
+  const r = await call<{ detalle: { sesion: MesaSesion; items: MesaSesionItem[]; total: number } }>(
+    `/api/mesas/pl/${encodeURIComponent(sesionId)}`, "GET"
+  );
+  return r.success ? r.detalle : null;
+}
+
+export function agregarItemPL(
+  sesionId: string,
+  payload: { producto_id: string; cantidad: number; observacion: string | null } & MitadItemPayload
+) {
+  return call<{ item: MesaSesionItem }>(`/api/mesas/pl/${encodeURIComponent(sesionId)}/items`, "POST", payload);
+}
+
+export function enviarComandaPL(sesionId: string) {
+  return call<ComandaEnvioResult>(`/api/mesas/pl/${encodeURIComponent(sesionId)}/comanda`, "POST", {});
+}
+
+export function cancelarPL(sesionId: string) {
+  return call<{ ok: boolean }>(`/api/mesas/pl/${encodeURIComponent(sesionId)}/cancelar`, "POST", {});
 }

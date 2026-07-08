@@ -210,13 +210,23 @@ export async function listarPorCobrarPg(schema: string, empresaId: string): Prom
   const { totalBy, countBy } = await totalesPorSesion(sb, empresaId, sesiones.map((s) => s.id));
   const mozoNombres = await resolveMozoNombres(sb, sesiones.map((s) => s.mozo_id ?? "").filter(Boolean));
 
-  return sesiones.map((sesion) => ({
-    mesa: (sesion.mesa_id && mesaById.get(sesion.mesa_id)) ?? { id: sesion.mesa_id ?? "", numero: 0, nombre: null, estado: "por_cobrar", activo: true },
-    sesion,
-    total: totalBy.get(sesion.id) ?? 0,
-    items_count: countBy.get(sesion.id) ?? 0,
-    mozo_nombre: sesion.mozo_id ? mozoNombres.get(sesion.mozo_id) ?? null : null,
-  }));
+  return sesiones.map((sesion) => {
+    const m: Mesa | undefined = sesion.mesa_id ? mesaById.get(sesion.mesa_id) : undefined;
+    const mesa: Mesa = m ?? {
+      id: sesion.mesa_id ?? "",
+      numero: 0,
+      nombre: null,
+      estado: "por_cobrar",
+      activo: true,
+    };
+    return {
+      mesa,
+      sesion,
+      total: totalBy.get(sesion.id) ?? 0,
+      items_count: countBy.get(sesion.id) ?? 0,
+      mozo_nombre: sesion.mozo_id ? mozoNombres.get(sesion.mozo_id) ?? null : null,
+    };
+  });
 }
 
 // ── PARA LLEVAR ───────────────────────────────────────────────────────────────

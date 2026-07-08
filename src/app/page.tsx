@@ -2088,9 +2088,9 @@ export default function DashboardPage() {
 
   const TAB_META: Record<TabDash, { label: string; icon: string }> = {
     comercial: { label: "Comercial", icon: "📊" },
-    financiero: { label: "Financiero", icon: "💰" },
-    inventario: { label: "Inventario", icon: "📦" },
-    ventas: { label: "Ventas", icon: "🛒" },
+    financiero: { label: "Financiero", icon: "" },
+    inventario: { label: "Inventario", icon: "" },
+    ventas: { label: "Ventas", icon: "" },
   };
 
   if (!config) {

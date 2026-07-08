@@ -94,12 +94,13 @@ function formatGs(v: number): string {
 function formatFecha(iso: string): string {
   try {
     const d = new Date(iso);
-    const dd = String(d.getDate()).padStart(2, "0");
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const yyyy = d.getFullYear();
-    const hh = String(d.getHours()).padStart(2, "0");
-    const min = String(d.getMinutes()).padStart(2, "0");
-    return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
+    if (Number.isNaN(d.getTime())) return iso;
+    // Paraguay usa UTC-3 fija desde 2024 (abolición del horario de verano).
+    // Server corre en UTC — hardcodeamos el offset para que la hora coincida
+    // con la del sistema (el tzdata del contenedor puede estar desactualizado).
+    const shifted = new Date(d.getTime() - 3 * 60 * 60 * 1000);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${p(shifted.getUTCDate())}/${p(shifted.getUTCMonth() + 1)}/${shifted.getUTCFullYear()} ${p(shifted.getUTCHours())}:${p(shifted.getUTCMinutes())}`;
   } catch {
     return iso;
   }

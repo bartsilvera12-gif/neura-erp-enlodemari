@@ -15,8 +15,16 @@ function formatGs(v: number): string {
 function formatFecha(iso: string): string {
   try {
     const d = new Date(iso);
-    const p = (n: number) => String(n).padStart(2, "0");
-    return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    if (Number.isNaN(d.getTime())) return iso;
+    // Server (Coolify) corre en UTC — forzar Asunción para que la hora impresa
+    // coincida con la del sistema.
+    const parts = new Intl.DateTimeFormat("es-PY", {
+      timeZone: "America/Asuncion",
+      day: "2-digit", month: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(d);
+    const g = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+    return `${g("day")}/${g("month")}/${g("year")} ${g("hour")}:${g("minute")}`;
   } catch { return iso; }
 }
 

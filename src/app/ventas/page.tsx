@@ -201,6 +201,9 @@ export default function VentasPage() {
   const [busqueda,   setBusqueda]   = useState("");
   const [filtroTipo, setFiltroTipo] = useState<TipoVenta | "">("");
   const [filtroIva,  setFiltroIva]  = useState<TipoIvaVenta | "">("");
+  // Paginación de la tabla: cantidad por página (0 = todas) y página actual.
+  const [porPagina, setPorPagina] = useState<number>(25);
+  const [pagina,    setPagina]    = useState<number>(1);
   // Caja por turno: sin caja abierta no se puede vender (badge + bloqueo del botón).
   const [cajaAbierta, setCajaAbierta] = useState(false);
 
@@ -244,6 +247,20 @@ export default function VentasPage() {
   });
 
   const hayFiltros = busqueda || filtroTipo || filtroIva;
+
+  // Volver a la página 1 cuando cambian filtros o el tamaño de página, para no
+  // quedar en una página que ya no existe.
+  useEffect(() => {
+    setPagina(1);
+  }, [busqueda, filtroTipo, filtroIva, porPagina]);
+
+  // Recorte de la página visible (0 = mostrar todas).
+  const totalPaginas = porPagina === 0 ? 1 : Math.max(1, Math.ceil(filtradas.length / porPagina));
+  const paginaSegura = Math.min(pagina, totalPaginas);
+  const inicio       = porPagina === 0 ? 0 : (paginaSegura - 1) * porPagina;
+  const visibles     = porPagina === 0 ? filtradas : filtradas.slice(inicio, inicio + porPagina);
+  const desde        = filtradas.length === 0 ? 0 : inicio + 1;
+  const hasta        = inicio + visibles.length;
 
   return (
     <div className="space-y-8">
@@ -370,9 +387,27 @@ export default function VentasPage() {
               Limpiar filtros
             </button>
           )}
-          <span className="ml-auto text-sm text-gray-400">
-            {filtradas.length} de {todas.length} ventas
-          </span>
+          <div className="ml-auto flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-400 whitespace-nowrap">Mostrar</span>
+              <FancySelect
+                value={String(porPagina)}
+                onChange={(v) => setPorPagina(Number(v))}
+                ariaLabel="Cantidad de ventas por página"
+                className="w-28"
+                size="sm"
+                options={[
+                  { value: "25",  label: "25" },
+                  { value: "50",  label: "50" },
+                  { value: "100", label: "100" },
+                  { value: "0",   label: "Todas" },
+                ]}
+              />
+            </div>
+            <span className="text-sm text-gray-400 whitespace-nowrap">
+              {filtradas.length} de {todas.length} ventas
+            </span>
+          </div>
         </div>
 
         {/* Tabla — min-w fuerza scroll horizontal en mobile; columnas secundarias
@@ -403,7 +438,7 @@ export default function VentasPage() {
                   </td>
                 </tr>
               ) : (
-                filtradas.map((v) => {
+                visibles.map((v) => {
                   const cantTotal = v.items.reduce((s, i) => s + i.cantidad, 0);
                   return (
                     <tr key={v.id} className="border-b border-slate-200 last:border-0 hover:bg-[#4FAEB2]/[0.04] transition-colors">
@@ -472,6 +507,37 @@ export default function VentasPage() {
             </tbody>
           </table>
         </EdgeScrollArea>
+
+        {/* Controles de paginación — sólo si hay más de una página. */}
+        {filtradas.length > 0 && porPagina !== 0 && totalPaginas > 1 && (
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4">
+            <span className="text-sm text-gray-500 tabular-nums">
+              Mostrando <span className="font-medium text-gray-700">{desde}–{hasta}</span> de{" "}
+              <span className="font-medium text-gray-700">{filtradas.length}</span>
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPagina((p) => Math.max(1, p - 1))}
+                disabled={paginaSegura <= 1}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Anterior
+              </button>
+              <span className="px-2 text-sm text-gray-500 tabular-nums">
+                Página {paginaSegura} de {totalPaginas}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
+                disabled={paginaSegura >= totalPaginas}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Siguiente
+              </button>
+            </div>
+          </div>
+        )}
 
       </div>
 

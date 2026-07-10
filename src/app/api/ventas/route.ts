@@ -68,16 +68,29 @@ export async function GET(request: NextRequest) {
       .limit(500);
     if (ventasQ.error) throw new Error(ventasQ.error.message);
 
-    const itemsQ = await ctx.supabase
-      .from("ventas_items")
-      .select(
-        "venta_id, producto_id, producto_nombre, sku, cantidad, precio_venta_original, precio_venta, tipo_iva, subtotal, monto_iva, total_linea"
-      )
-      .eq("empresa_id", empresaId);
-    if (itemsQ.error) throw new Error(itemsQ.error.message);
-
     const ventasRows = (ventasQ.data ?? []) as VentaRow[];
-    const itemsRows = (itemsQ.data ?? []) as VentaItemRow[];
+
+    // Paginar los ítems con `.range()`: sin esto PostgREST corta en 1000 filas y,
+    // al superar ese total, las ventas más nuevas quedaban sin líneas ("Sin líneas
+    // cargadas"). Se filtra solo por empresa (URL corta) y se recorre por páginas
+    // hasta agotar; NO se listan venta_ids en la URL (eso la haría exceder el límite
+    // de longitud del proxy y romper el listado por completo).
+    const itemsRows: VentaItemRow[] = [];
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const itemsQ = await ctx.supabase
+        .from("ventas_items")
+        .select(
+          "venta_id, producto_id, producto_nombre, sku, cantidad, precio_venta_original, precio_venta, tipo_iva, subtotal, monto_iva, total_linea"
+        )
+        .eq("empresa_id", empresaId)
+        .order("venta_id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (itemsQ.error) throw new Error(itemsQ.error.message);
+      const page = (itemsQ.data ?? []) as VentaItemRow[];
+      for (const row of page) itemsRows.push(row);
+      if (page.length < PAGE) break;
+    }
 
     const byVenta = new Map<string, VentaItemRow[]>();
     for (const row of itemsRows) {

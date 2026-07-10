@@ -58,25 +58,29 @@ export async function GET(request: NextRequest) {
     if (!ctx) return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
     const empresaId = ctx.auth.empresa_id;
 
-    const ventasQ = await ctx.supabase
-      .from("ventas")
-      .select(
-        "id, empresa_id, numero_control, moneda, tipo_cambio, subtotal, monto_iva, total, tipo_venta, plazo_dias, metodo_pago, fecha"
-      )
-      .eq("empresa_id", empresaId)
-      .order("fecha", { ascending: false })
-      .limit(500);
-    if (ventasQ.error) throw new Error(ventasQ.error.message);
-
-    const ventasRows = (ventasQ.data ?? []) as VentaRow[];
-
-    // Paginar los ítems con `.range()`: sin esto PostgREST corta en 1000 filas y,
-    // al superar ese total, las ventas más nuevas quedaban sin líneas ("Sin líneas
-    // cargadas"). Se filtra solo por empresa (URL corta) y se recorre por páginas
-    // hasta agotar; NO se listan venta_ids en la URL (eso la haría exceder el límite
-    // de longitud del proxy y romper el listado por completo).
-    const itemsRows: VentaItemRow[] = [];
+    // PostgREST corta cada respuesta en 1000 filas (y antes había un tope manual de
+    // 500 ventas). Para traer TODO sin límite, paginamos con `.range()` en bloques de
+    // 1000 hasta agotar. URL corta (solo filtro por empresa); NO se listan ids en la
+    // URL (eso la haría exceder el límite de longitud del proxy y romper el listado).
     const PAGE = 1000;
+
+    const ventasRows: VentaRow[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const ventasQ = await ctx.supabase
+        .from("ventas")
+        .select(
+          "id, empresa_id, numero_control, moneda, tipo_cambio, subtotal, monto_iva, total, tipo_venta, plazo_dias, metodo_pago, fecha"
+        )
+        .eq("empresa_id", empresaId)
+        .order("fecha", { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (ventasQ.error) throw new Error(ventasQ.error.message);
+      const page = (ventasQ.data ?? []) as VentaRow[];
+      for (const row of page) ventasRows.push(row);
+      if (page.length < PAGE) break;
+    }
+
+    const itemsRows: VentaItemRow[] = [];
     for (let from = 0; ; from += PAGE) {
       const itemsQ = await ctx.supabase
         .from("ventas_items")

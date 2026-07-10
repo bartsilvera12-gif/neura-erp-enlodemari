@@ -68,26 +68,16 @@ export async function GET(request: NextRequest) {
       .limit(500);
     if (ventasQ.error) throw new Error(ventasQ.error.message);
 
-    const ventasRows = (ventasQ.data ?? []) as VentaRow[];
+    const itemsQ = await ctx.supabase
+      .from("ventas_items")
+      .select(
+        "venta_id, producto_id, producto_nombre, sku, cantidad, precio_venta_original, precio_venta, tipo_iva, subtotal, monto_iva, total_linea"
+      )
+      .eq("empresa_id", empresaId);
+    if (itemsQ.error) throw new Error(itemsQ.error.message);
 
-    // Items SOLO de las ventas devueltas, en lotes por venta_id. Evita el tope de
-    // 1000 filas de PostgREST: con `.eq(empresa_id)` a secas, al superar 1000 ítems
-    // en total, las ventas más nuevas quedaban sin líneas ("Sin líneas cargadas").
-    const ventaIds = ventasRows.map((r) => r.id);
-    const itemsRows: VentaItemRow[] = [];
-    const CHUNK = 100; // ~100 ventas × pocos ítems ≪ 1000 filas por consulta
-    for (let i = 0; i < ventaIds.length; i += CHUNK) {
-      const slice = ventaIds.slice(i, i + CHUNK);
-      const itemsQ = await ctx.supabase
-        .from("ventas_items")
-        .select(
-          "venta_id, producto_id, producto_nombre, sku, cantidad, precio_venta_original, precio_venta, tipo_iva, subtotal, monto_iva, total_linea"
-        )
-        .eq("empresa_id", empresaId)
-        .in("venta_id", slice);
-      if (itemsQ.error) throw new Error(itemsQ.error.message);
-      for (const row of (itemsQ.data ?? []) as VentaItemRow[]) itemsRows.push(row);
-    }
+    const ventasRows = (ventasQ.data ?? []) as VentaRow[];
+    const itemsRows = (itemsQ.data ?? []) as VentaItemRow[];
 
     const byVenta = new Map<string, VentaItemRow[]>();
     for (const row of itemsRows) {

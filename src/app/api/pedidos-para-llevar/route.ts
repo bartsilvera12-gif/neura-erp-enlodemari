@@ -7,7 +7,10 @@ import { ESTADOS_COMANDA, type EstadoComanda } from "@/lib/comandas/types";
 
 export const dynamic = "force-dynamic";
 
-/** GET /api/comandas?estado= — comandas recientes para el tablero de cocina. */
+/**
+ * GET /api/pedidos-para-llevar?estado= — comandas de sesiones PARA LLEVAR.
+ * Espejo de /api/comandas pero filtrando tipo='para_llevar'. Mismos estados.
+ */
 export async function GET(request: NextRequest) {
   try {
     const gate = await requireModule(request, "comandas");
@@ -17,11 +20,10 @@ export async function GET(request: NextRequest) {
     const url = new URL(request.url);
     const estadoRaw = url.searchParams.get("estado");
     const estado = estadoRaw && ESTADOS_COMANDA.includes(estadoRaw as EstadoComanda) ? (estadoRaw as EstadoComanda) : null;
-    // /comandas es SOLO para mesa. Los pedidos Para llevar se ven en /pedidos-para-llevar.
-    const comandas = await listarComandasPg(schema, auth.empresa_id, { estado, tipo: "mesa" });
+    const comandas = await listarComandasPg(schema, auth.empresa_id, { estado, tipo: "para_llevar" });
     return NextResponse.json(successResponse({ comandas }));
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "No se pudieron cargar las comandas.";
+    const msg = err instanceof Error ? err.message : "No se pudieron cargar los pedidos Para llevar.";
     return NextResponse.json(errorResponse(msg), { status: 500 });
   }
 }

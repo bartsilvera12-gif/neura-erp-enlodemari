@@ -119,6 +119,7 @@ const MENU_STRUCTURE: MenuItem[] = [
   },
   { key: "mesas", slug: "mesas", label: "Mesas", href: "/mesas", icon: LayoutGrid },
   { key: "comandas", slug: "comandas", label: "Comandas", href: "/comandas", icon: ClipboardList },
+  { key: "pedidos-para-llevar", slug: "comandas", label: "Pedidos para llevar", href: "/pedidos-para-llevar", icon: ClipboardList },
   { key: "ventas", slug: "ventas", label: "Caja", href: "/ventas", icon: ShoppingCart },
   { key: "reportes", slug: "reportes", label: "Reportes", href: "/reportes", icon: BarChart3 },
   {

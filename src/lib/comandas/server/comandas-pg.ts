@@ -167,7 +167,7 @@ async function armarCards(sb: Sb, empresaId: string, comandas: ComandaRow[]): Pr
 export async function listarComandasPg(
   schema: string,
   empresaId: string,
-  opts?: { estado?: EstadoComanda | null; horas?: number }
+  opts?: { estado?: EstadoComanda | null; horas?: number; tipo?: "mesa" | "para_llevar" | null }
 ): Promise<ComandaCard[]> {
   const sb = createServiceRoleClientWithDbSchema(schema);
   const horas = opts?.horas ?? 24;
@@ -185,7 +185,9 @@ export async function listarComandasPg(
 
   const { data, error } = await q;
   if (error) throw new Error(error.message);
-  return armarCards(sb, empresaId, (data ?? []) as unknown as ComandaRow[]);
+  const cards = await armarCards(sb, empresaId, (data ?? []) as unknown as ComandaRow[]);
+  if (opts?.tipo) return cards.filter((c) => (c.sesion_tipo ?? "mesa") === opts.tipo);
+  return cards;
 }
 
 /**
@@ -196,7 +198,7 @@ export async function listarComandasPg(
 export async function listarComandasHistorialPg(
   schema: string,
   empresaId: string,
-  f?: ComandaHistorialFiltros
+  f?: ComandaHistorialFiltros & { tipo?: "mesa" | "para_llevar" | null }
 ): Promise<ComandaCard[]> {
   const sb = createServiceRoleClientWithDbSchema(schema);
   let q = sb
@@ -214,7 +216,8 @@ export async function listarComandasHistorialPg(
   if (error) throw new Error(error.message);
   let cards = await armarCards(sb, empresaId, (data ?? []) as unknown as ComandaRow[]);
 
-  // Filtros resueltos sobre datos ya ensamblados (mesa/mozo/numero).
+  // Filtros resueltos sobre datos ya ensamblados (mesa/mozo/numero/tipo).
+  if (f?.tipo) cards = cards.filter((c) => (c.sesion_tipo ?? "mesa") === f.tipo);
   if (f?.numero != null) cards = cards.filter((c) => c.numero === f.numero);
   if (f?.mesa != null) cards = cards.filter((c) => c.mesa_numero === f.mesa);
   if (f?.mozo) {

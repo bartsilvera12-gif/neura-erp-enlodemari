@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/comandas/historial — comandas impresas y/o canceladas (no operativas).
  * Filtros: desde, hasta (YYYY-MM-DD), estado (impresa|cancelada), mesa, mozo, numero.
+ * Solo mesa — los pedidos Para llevar tienen su propio módulo.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -31,6 +32,7 @@ export async function GET(request: NextRequest) {
       mesa,
       mozo: url.searchParams.get("mozo"),
       numero,
+      tipo: "mesa",
     });
     return NextResponse.json(successResponse({ comandas }));
   } catch (err) {

@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, ShoppingCart, Users, Utensils, Menu } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Home, ShoppingCart, Users, Utensils, Menu, LayoutGrid, ClipboardList, Package } from "lucide-react";
 import { useBoot } from "@/components/BootContext";
+import { getCurrentUser } from "@/lib/auth";
 
 /**
  * Barra de navegación inferior — solo visible en mobile (md:hidden).
@@ -12,12 +14,9 @@ import { useBoot } from "@/components/BootContext";
  * más usados accesibles a 1 tap desde cualquier pantalla. El botón "Más" abre
  * el sidebar drawer existente con todos los módulos.
  *
- * Visible solo en mobile. En desktop la navegación va por el sidebar lateral.
- * El padding bottom del <main> en mobile se ajusta con pb-20 para que el
- * contenido scrollee por arriba de la barra sin quedar tapado.
- *
- * Safe-area: usa pb-[env(safe-area-inset-bottom)] para evitar que el notch
- * inferior de iPhone tape los iconos.
+ * Los ítems se adaptan al rol del usuario:
+ *  - mozo: Mesas, Comandas, Pedidos para llevar (los 3 módulos que usa un día).
+ *  - resto: Caja, Pedidos, Clientes (default original).
  */
 
 type NavItem = {
@@ -27,11 +26,18 @@ type NavItem = {
   matchPrefixes?: string[]; // si la ruta empieza con cualquiera, marcamos activo
 };
 
-const ITEMS: NavItem[] = [
+const ITEMS_DEFAULT: NavItem[] = [
   { href: "/", label: "Inicio", icon: Home, matchPrefixes: ["/"] },
   { href: "/ventas", label: "Caja", icon: ShoppingCart, matchPrefixes: ["/ventas"] },
   { href: "/dashboard/proyectos", label: "Pedidos", icon: Utensils, matchPrefixes: ["/dashboard/proyectos"] },
   { href: "/clientes", label: "Clientes", icon: Users, matchPrefixes: ["/clientes", "/gestion-clientes"] },
+];
+
+const ITEMS_MOZO: NavItem[] = [
+  { href: "/", label: "Inicio", icon: Home, matchPrefixes: ["/"] },
+  { href: "/mesas", label: "Mesas", icon: LayoutGrid, matchPrefixes: ["/mesas"] },
+  { href: "/comandas", label: "Comandas", icon: ClipboardList, matchPrefixes: ["/comandas"] },
+  { href: "/pedidos-para-llevar", label: "Para llevar", icon: Package, matchPrefixes: ["/pedidos-para-llevar"] },
 ];
 
 function isActive(pathname: string | null, item: NavItem): boolean {
@@ -45,6 +51,22 @@ function isActive(pathname: string | null, item: NavItem): boolean {
 export default function MobileBottomNav() {
   const pathname = usePathname();
   const { setMobileSidebarOpen } = useBoot();
+  const [items, setItems] = useState<NavItem[]>(ITEMS_DEFAULT);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const cu = await getCurrentUser();
+        if (cancelled) return;
+        const rol = (cu?.rol ?? "").trim().toLowerCase();
+        setItems(rol === "mozo" ? ITEMS_MOZO : ITEMS_DEFAULT);
+      } catch {
+        // Sin sesión / error → dejamos el default.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <nav
@@ -54,7 +76,7 @@ export default function MobileBottomNav() {
       aria-label="Navegación principal mobile"
     >
       <div className="mx-auto grid max-w-3xl grid-cols-5">
-        {ITEMS.map((item) => {
+        {items.map((item) => {
           const Icon = item.icon;
           const active = isActive(pathname, item);
           return (

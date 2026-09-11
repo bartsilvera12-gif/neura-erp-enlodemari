@@ -28,6 +28,15 @@ function parseDateRangeFromQuery(sp: URLSearchParams): DateRange {
   return { desde, hasta };
 }
 
+/** Suma `days` a una fecha `YYYY-MM-DD` y devuelve el resultado en el mismo formato. */
+function ymdPlusDays(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    dt.getUTCDate()
+  ).padStart(2, "0")}`;
+}
+
 /**
  * Fallback PG directo para tablas operativas que necesita el dashboard
  * cuando el tenant `erp_*` no esta expuesto en PostgREST.
@@ -227,10 +236,6 @@ export async function GET(request: NextRequest) {
       const base = supabase.from("tipificaciones").select("*").eq("empresa_id", empresaId);
       return range ? base.gte("fecha", range.desde).lte("fecha", range.hasta) : base;
     };
-    const buildVentasQ = () => {
-      const base = supabase.from("ventas").select("*").eq("empresa_id", empresaId);
-      return range ? base.gte("fecha", range.desde).lte("fecha", range.hasta) : base;
-    };
     const buildComprasQ = () => {
       const base = supabase.from("compras").select("*").eq("empresa_id", empresaId);
       return range ? base.gte("fecha", range.desde).lte("fecha", range.hasta) : base;
@@ -241,13 +246,62 @@ export async function GET(request: NextRequest) {
     };
 
     /**
-     * ventas_items no tiene columna fecha directa; se filtra por `venta_id` de ventas en rango.
-     * Si hay rango: se ejecuta secuencial después de ventas para conocer los IDs válidos.
-     * Si no hay rango: se ejecuta en paralelo con el resto (comportamiento previo).
+     * PostgREST corta cada respuesta en 1000 filas. En un POS (p. ej. restaurante)
+     * las ventas de varios meses superan de sobra ese tope, así que sin paginar el
+     * dashboard subcontaba (o mostraba vacías) las métricas de Ventas: solo llegaban
+     * las primeras 1000 filas y las ventas recientes quedaban fuera. Paginamos con
+     * `.range()` en bloques de 1000 hasta agotar. Mismo patrón que /api/ventas.
      */
-    const ventasItemsParalelo = range
-      ? Promise.resolve({ data: null as unknown[] | null, error: null as { message: string } | null })
-      : supabase.from("ventas_items").select("*").eq("empresa_id", empresaId);
+    const PAGE = 1000;
+
+    /** ventas: paginado respetando el filtro de fecha (`range`) + orden estable. */
+    const fetchVentasPaged = async (): Promise<{
+      data: unknown[];
+      error: { message: string } | null;
+    }> => {
+      // `ventas.fecha` es timestamptz: `<= hasta` (fecha sin hora = medianoche)
+      // excluiría las ventas del propio día `hasta` (p. ej. las de HOY → "Ventas del
+      // día" en 0). Límite superior exclusivo con 2 días de margen; el cliente
+      // (enRango) recorta al día exacto, así que esto solo acota el volumen.
+      const hastaExcl = range ? ymdPlusDays(range.hasta, 2) : null;
+      const all: unknown[] = [];
+      for (let from = 0; ; from += PAGE) {
+        let q = supabase.from("ventas").select("*").eq("empresa_id", empresaId);
+        if (range && hastaExcl) q = q.gte("fecha", range.desde).lt("fecha", hastaExcl);
+        const res = await q.order("fecha", { ascending: false }).range(from, from + PAGE - 1);
+        if (res.error) return { data: all, error: res.error };
+        const page = (res.data ?? []) as unknown[];
+        for (const row of page) all.push(row);
+        if (page.length < PAGE) break;
+      }
+      return { data: all, error: null };
+    };
+
+    /**
+     * ventas_items no tiene columna fecha propia. Se traen TODOS los items de la
+     * empresa paginados y se agrupan por `venta_id` en el cliente (data.ts solo
+     * adjunta los items de las ventas cargadas). No se listan los `venta_id` en la
+     * URL a propósito: con miles de ventas excedería el límite de longitud del proxy.
+     */
+    const fetchVentasItemsPaged = async (): Promise<{
+      data: unknown[];
+      error: { message: string } | null;
+    }> => {
+      const all: unknown[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const res = await supabase
+          .from("ventas_items")
+          .select("*")
+          .eq("empresa_id", empresaId)
+          .order("venta_id", { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (res.error) return { data: all, error: res.error };
+        const page = (res.data ?? []) as unknown[];
+        for (const row of page) all.push(row);
+        if (page.length < PAGE) break;
+      }
+      return { data: all, error: null };
+    };
 
     const [
       clientesQ,
@@ -270,8 +324,8 @@ export async function GET(request: NextRequest) {
       buildPagosQ(),
       buildTipificacionesQ(),
       supabase.from("productos").select("*").eq("empresa_id", empresaId),
-      buildVentasQ(),
-      ventasItemsParalelo,
+      fetchVentasPaged(),
+      fetchVentasItemsPaged(),
       buildComprasQ(),
       buildGastosQ(),
       supabase
@@ -316,35 +370,14 @@ export async function GET(request: NextRequest) {
       if (ventasRows.length > 0) delete queryErrors.ventas;
     }
 
-    /**
-     * ventas_items con filtro: ahora que tenemos las ventas filtradas, traemos solo
-     * los items de esas ventas. Sin filtro: ya vino del Promise.all.
-     */
-    let ventasItemsRows: unknown[];
-    if (range) {
-      const ventaIds = ventasRows
-        .map((v) => (v as { id?: string }).id)
-        .filter((id): id is string => typeof id === "string" && id.length > 0);
-      if (ventaIds.length === 0) {
-        ventasItemsRows = [];
-      } else {
-        const itemsRes = await supabase
-          .from("ventas_items")
-          .select("*")
-          .eq("empresa_id", empresaId)
-          .in("venta_id", ventaIds);
-        ventasItemsRows = pickRows("ventas_items", itemsRes, queryErrors);
-        if ((ventasItemsRows.length === 0 && queryErrors.ventas_items) || (usarPg && ventasItemsRows.length === 0)) {
-          ventasItemsRows = await fallbackVentasItemsPg(dataSchema, empresaId, ventaIds);
-          if (ventasItemsRows.length > 0) delete queryErrors.ventas_items;
-        }
-      }
-    } else {
-      ventasItemsRows = pickRows("ventas_items", ventasItemsQ as { data: unknown[] | null; error: { message: string } | null }, queryErrors);
-      if ((ventasItemsRows.length === 0 && queryErrors.ventas_items) || (usarPg && ventasItemsRows.length === 0)) {
-        ventasItemsRows = await fallbackVentasItemsPg(dataSchema, empresaId, null);
-        if (ventasItemsRows.length > 0) delete queryErrors.ventas_items;
-      }
+    let ventasItemsRows = pickRows(
+      "ventas_items",
+      ventasItemsQ as { data: unknown[] | null; error: { message: string } | null },
+      queryErrors
+    );
+    if ((ventasItemsRows.length === 0 && queryErrors.ventas_items) || (usarPg && ventasItemsRows.length === 0)) {
+      ventasItemsRows = await fallbackVentasItemsPg(dataSchema, empresaId, null);
+      if (ventasItemsRows.length > 0) delete queryErrors.ventas_items;
     }
 
     const payload = {

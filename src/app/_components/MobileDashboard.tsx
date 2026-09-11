@@ -13,7 +13,6 @@ import {
   TrendingUp,
   TrendingDown,
   ChevronRight,
-  Wallet,
   Boxes,
   Home as HomeIcon,
 } from "lucide-react";
@@ -377,10 +376,10 @@ export default function MobileDashboard({
             </button>
           ))}
         </div>
-        {/* Selector de seccion: Ventas / Financiero / Inventario */}
-        <div className="mt-2 grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-xl">
+        {/* Selector de seccion: Ventas / Inventario (Financiero oculto: este
+            cliente no usa el módulo financiero). */}
+        <div className="mt-2 grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-xl">
           <SectionTab active={seccion === "ventas"} onClick={() => setSeccion("ventas")} icon={ShoppingCart} label="Ventas" />
-          <SectionTab active={seccion === "financiero"} onClick={() => setSeccion("financiero")} icon={Wallet} label="Financiero" />
           <SectionTab active={seccion === "inventario"} onClick={() => setSeccion("inventario")} icon={Boxes} label="Inventario" />
         </div>
       </div>

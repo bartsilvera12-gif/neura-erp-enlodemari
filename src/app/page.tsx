@@ -1932,6 +1932,12 @@ const PERIODO_OPTS: { id: Periodo; label: string }[] = [
 
 const TAB_VALID: TabDash[] = ["comercial", "financiero", "inventario", "ventas"];
 
+// Instancia En lo de Mari: solo Ventas / Inventario (sin Comercial/CRM/Pipeline
+// ni Financiero — este cliente no usa el módulo financiero). A nivel de módulo
+// para que getInitialTab también lo respete (evita montar la pestaña oculta ni
+// por un frame al entrar por URL directa, p. ej. ?tab=financiero).
+const MARI_ALLOWED_TABS: TabDash[] = ["ventas", "inventario"];
+
 type DashScope =
   | { kind: "pending" }
   | { kind: "legacy" }
@@ -1942,7 +1948,7 @@ function getInitialTab(): TabDash {
   if (typeof window === "undefined") return "ventas";
   const params = new URLSearchParams(window.location.search);
   const t = params.get("tab");
-  return t && isDashboardTabSlug(t) ? t : "ventas";
+  return t && isDashboardTabSlug(t) && MARI_ALLOWED_TABS.includes(t) ? t : "ventas";
 }
 
 export default function DashboardPage() {
@@ -2070,9 +2076,6 @@ export default function DashboardPage() {
   const mapNombreTipoServicio = useMapNombreTipoServicioCatalogo(clientes);
   const nivel = usuarioActivo?.nivel ?? "administrador";
 
-  // Instancia En lo de Mari: solo Ventas / Inventario (sin Comercial/CRM/Pipeline
-  // ni Financiero — este cliente no usa el módulo financiero).
-  const MARI_ALLOWED_TABS: TabDash[] = ["ventas", "inventario"];
   const rawTabs: TabDash[] = dashScope.kind === "scoped" ? dashScope.tabs : TAB_VALID;
   const effectiveTabs: TabDash[] = rawTabs.filter((t) => MARI_ALLOWED_TABS.includes(t));
   const showTabNav = effectiveTabs.length > 1;
@@ -2293,7 +2296,7 @@ export default function DashboardPage() {
         />
       )}
 
-      {tab === "financiero" && (
+      {tab === "financiero" && effectiveTabs.includes("financiero") && (
         <DashFinanciero
           facturas={facturas}
           pagos={pagos}
